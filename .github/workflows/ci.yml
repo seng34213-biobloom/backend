@@ -55,5 +55,8 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Apply database migrations
+        run: npm run prisma:deploy
+
       - name: Integration tests
         run: npm run test:e2e
