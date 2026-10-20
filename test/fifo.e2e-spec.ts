@@ -5,6 +5,7 @@ import { AppModule } from '../src/app.module';
 import { OutOfStockError } from '../src/inventory/inventory.errors';
 import { InventoryService } from '../src/inventory/inventory.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { ProductsService } from '../src/products/products.service';
 
 /**
  * Real Postgres + Prisma.
@@ -14,6 +15,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
  *   - Spans batches when needed; fully-drained batches → DEPLETED.
  *   - Expired batches are NOT touched, and a failed decrement rolls back.
  *   - FOR UPDATE row locks stop concurrent decrements from overselling.
+ *   - The public catalogue drops a product once its valid stock reaches zero.
  */
 describe('FIFO inventory (e2e)', () => {
   let app: INestApplication;
@@ -182,6 +184,17 @@ describe('FIFO inventory (e2e)', () => {
     expect(rejected).toHaveLength(1);
     expect(rejected[0].reason).toBeInstanceOf(OutOfStockError);
     expect(await inventory.availableStock(fixture.variantId)).toBe(2);
+  });
+
+  it('GET /api/products excludes products with zero valid stock', async () => {
+    const products = app.get(ProductsService);
+    const search = `FIFO test ${stamp} main`;
+    expect((await products.list({ search, page: 1, pageSize: 24 })).total).toBe(1);
+
+    // Drain the last valid batch; only the expired batch is left
+    await prisma.$transaction((tx) => inventory.decrementForVariant(variantId, 10, tx));
+
+    expect((await products.list({ search, page: 1, pageSize: 24 })).total).toBe(0);
   });
 });
 
