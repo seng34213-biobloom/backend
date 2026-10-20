@@ -60,6 +60,7 @@ src/
   main.ts           Entry point
   health/           GET /api/health liveness check
   inventory/        FIFO stock checks and batch allocation
+  products/         Public product catalogue API
   prisma/           PrismaService, available globally
 prisma/
   schema.prisma     Database schema
@@ -83,6 +84,16 @@ Batches are consumed FIFO by expiry date, so `product_batch` is indexed on `expi
 
 - `availableStock(variantId)` and `checkStock(variantId, qty)` count only valid batches: not expired, not `DEPLETED`, quantity above zero.
 - `decrementForVariant(variantId, qty, tx)` must run inside a Prisma `$transaction`. It locks the valid batches with `SELECT ... FOR UPDATE`, takes stock earliest-expiry-first, marks emptied batches `DEPLETED` and throws `OutOfStockError` (HTTP 409) when stock is short, which rolls the transaction back.
+
+## API
+
+All routes are under `/api`. Invalid input returns `422 Unprocessable Entity`.
+
+| Method | Route             | Description                                                                                                                    |
+| ------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| GET    | `/health`         | Liveness check                                                                                                                 |
+| GET    | `/products`       | Catalogue. Query: `category`, `search`, `page` (default 1), `pageSize` (default 24, max 60). Only products with sellable stock |
+| GET    | `/products/:slug` | Product detail with `stockByVariant` and `earliestExpiryByVariant`                                                             |
 
 ## Branching
 
