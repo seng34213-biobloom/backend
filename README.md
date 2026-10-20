@@ -59,6 +59,7 @@ src/
   app.setup.ts      Global prefix, CORS and validation, shared with e2e tests
   main.ts           Entry point
   health/           GET /api/health liveness check
+  inventory/        FIFO stock checks and batch allocation
   prisma/           PrismaService, available globally
 prisma/
   schema.prisma     Database schema
@@ -75,6 +76,13 @@ test/               Integration tests
 | `product_batch`   | Stock received for a variant, with manufactured and expiry dates |
 
 Batches are consumed FIFO by expiry date, so `product_batch` is indexed on `expiry_date` and on `(product_variant_id, expiry_date)`. The database rejects negative quantities, a current quantity above the initial quantity, and an expiry date before the manufactured date.
+
+## Inventory allocation
+
+`InventoryService` is the only code that changes batch quantities.
+
+- `availableStock(variantId)` and `checkStock(variantId, qty)` count only valid batches: not expired, not `DEPLETED`, quantity above zero.
+- `decrementForVariant(variantId, qty, tx)` must run inside a Prisma `$transaction`. It locks the valid batches with `SELECT ... FOR UPDATE`, takes stock earliest-expiry-first, marks emptied batches `DEPLETED` and throws `OutOfStockError` (HTTP 409) when stock is short, which rolls the transaction back.
 
 ## Branching
 
