@@ -62,19 +62,19 @@ model AdminUser {
 }
 
 model Seller {
-  id           String       @id @default(uuid()) @db.Uuid
-  email        String       @unique
-  passwordHash String       @map("password_hash")
-  businessName String       @map("business_name")
-  contactName  String       @map("contact_name")
-  phone        String
-  taxId        String?      @map("tax_id")
-  status       SellerStatus @default(PENDING)
-  approvedAt   DateTime?    @map("approved_at")
-  approvedByAdminId String?  @map("approved_by_admin_id") @db.Uuid
-  rejectionReason String?   @map("rejection_reason")
-  createdAt    DateTime     @default(now()) @map("created_at")
-  updatedAt    DateTime     @updatedAt @map("updated_at")
+  id                String       @id @default(uuid()) @db.Uuid
+  email             String       @unique
+  passwordHash      String       @map("password_hash")
+  businessName      String       @map("business_name")
+  contactName       String       @map("contact_name")
+  phone             String
+  taxId             String?      @map("tax_id")
+  status            SellerStatus @default(PENDING)
+  approvedAt        DateTime?    @map("approved_at")
+  approvedByAdminId String?      @map("approved_by_admin_id") @db.Uuid
+  rejectionReason   String?      @map("rejection_reason")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
 
   @@index([status])
   @@map("seller")
