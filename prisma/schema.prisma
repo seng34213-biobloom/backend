@@ -14,6 +14,13 @@ enum BatchStatus {
   DEPLETED
 }
 
+enum AuditActorType {
+  ADMIN
+  SELLER
+  SYSTEM
+  CUSTOMER
+}
+
 enum Role {
   CUSTOMER
   ADMIN
@@ -57,6 +64,8 @@ model AdminUser {
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
+  auditLogs AuditLog[]
+
   @@index([email])
   @@map("admin_user")
 }
@@ -76,6 +85,8 @@ model Seller {
   createdAt         DateTime     @default(now()) @map("created_at")
   updatedAt         DateTime     @updatedAt @map("updated_at")
 
+  products Product[]
+
   @@index([status])
   @@map("seller")
 }
@@ -94,8 +105,32 @@ model DeliveryUser {
   @@map("delivery_user")
 }
 
+// Append-only record of privileged changes (SDS §7.2). actorId only links to admin users;
+// seller, customer and system actions keep their actor ID in metadata.
+model AuditLog {
+  id         String         @id @default(uuid()) @db.Uuid
+  actorType  AuditActorType @map("actor_type")
+  actorId    String?        @map("actor_id") @db.Uuid
+  action     String
+  targetType String         @map("target_type")
+  targetId   String?        @map("target_id")
+  metadata   Json?
+  ipAddress  String?        @map("ip_address")
+  userAgent  String?        @map("user_agent")
+  createdAt  DateTime       @default(now()) @map("created_at")
+
+  adminUser AdminUser? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorType, actorId])
+  @@index([targetType, targetId])
+  @@index([createdAt])
+  @@map("audit_log")
+}
+
 model Product {
   id              String   @id @default(uuid()) @db.Uuid
+  // Owning seller; null for products managed directly by Bio Bloom admins
+  sellerId        String?  @map("seller_id") @db.Uuid
   name            String
   slug            String   @unique
   description     String
@@ -107,8 +142,10 @@ model Product {
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
+  seller   Seller?          @relation(fields: [sellerId], references: [id], onDelete: Restrict)
   variants ProductVariant[]
 
+  @@index([sellerId])
   @@index([category, active])
   @@map("product")
 }
