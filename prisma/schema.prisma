@@ -41,6 +41,17 @@ enum SellerStatus {
   SUSPENDED
 }
 
+enum SubscriptionStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+}
+
+enum PaymentGateway {
+  STRIPE
+  PAYHERE
+}
+
 model Customer {
   id           String   @id @default(uuid()) @db.Uuid
   email        String   @unique
@@ -50,8 +61,31 @@ model Customer {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
+  addresses     Address[]
+  subscriptions Subscription[]
+
   @@index([email])
   @@map("customer")
+}
+
+model Address {
+  id         String   @id @default(uuid()) @db.Uuid
+  customerId String   @map("customer_id") @db.Uuid
+  line1      String
+  line2      String?
+  city       String
+  district   String
+  postalCode String   @map("postal_code")
+  country    String   @default("LK") @db.Char(2)
+  isDefault  Boolean  @default(false) @map("is_default")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  customer      Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  subscriptions Subscription[]
+
+  @@index([customerId])
+  @@map("address")
 }
 
 model AdminUser {
@@ -163,8 +197,9 @@ model ProductVariant {
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
-  product Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
-  batches ProductBatch[]
+  product       Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  batches       ProductBatch[]
+  subscriptions Subscription[]
 
   @@index([productId])
   @@map("product_variant")
@@ -190,4 +225,32 @@ model ProductBatch {
   @@index([productVariantId, expiryDate])
   @@index([expiryDate])
   @@map("product_batch")
+}
+
+// The payment token is stored encrypted with pgcrypto (pgp_sym_encrypt); see TokenCipherService.
+// Frequency, quantity and discount rules are enforced with CHECK constraints in the migration SQL.
+model Subscription {
+  id                    String             @id @default(uuid()) @db.Uuid
+  customerId            String             @map("customer_id") @db.Uuid
+  productVariantId      String             @map("product_variant_id") @db.Uuid
+  shippingAddressId     String             @map("shipping_address_id") @db.Uuid
+  frequencyDays         Int                @map("frequency_days")
+  discountRate          Decimal            @map("discount_rate") @db.Decimal(5, 4)
+  quantity              Int                @default(1)
+  status                SubscriptionStatus @default(ACTIVE)
+  nextBillingDate       DateTime           @map("next_billing_date") @db.Date
+  paymentTokenEncrypted Bytes              @map("payment_token_encrypted")
+  paymentGateway        PaymentGateway     @map("payment_gateway")
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
+  cancelledAt           DateTime?          @map("cancelled_at")
+
+  customer        Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  variant         ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
+  shippingAddress Address        @relation(fields: [shippingAddressId], references: [id], onDelete: Restrict)
+
+  // The daily billing job selects due ACTIVE subscriptions
+  @@index([status, nextBillingDate])
+  @@index([customerId])
+  @@map("subscription")
 }

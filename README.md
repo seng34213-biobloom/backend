@@ -63,6 +63,7 @@ src/
   health/           GET /api/health liveness check
   inventory/        FIFO stock checks and batch allocation
   products/         Public product catalogue API
+  subscriptions/    Subscribe & Save lifecycle and payment token encryption
   prisma/           PrismaService, available globally
 prisma/
   schema.prisma     Database schema
@@ -80,6 +81,8 @@ test/               Integration tests
 | `audit_log`       | Who changed what: actor, action, target and metadata                                |
 
 Batches are consumed FIFO by expiry date, so `product_batch` is indexed on `expiry_date` and on `(product_variant_id, expiry_date)`. The database rejects negative quantities, a current quantity above the initial quantity, and an expiry date before the manufactured date.
+
+Subscriptions run every 14, 30 or 60 days for 1 to 10 units. Their status moves `ACTIVE` ↔ `PAUSED`, and either can move to `CANCELLED`, which is final. The payment token is encrypted with pgcrypto using `SUBSCRIPTION_TOKEN_ENC_KEY` and is never returned by the API.
 
 ## Inventory allocation
 

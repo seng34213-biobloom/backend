@@ -13,6 +13,7 @@ import { InventoryModule } from './inventory/inventory.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
 import { RedisModule } from './redis/redis.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { RedisModule } from './redis/redis.module';
     InventoryModule,
     ProductsModule,
     BatchesModule,
+    SubscriptionsModule,
     HealthModule,
     AuthModule,
   ],
