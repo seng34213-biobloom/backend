@@ -39,5 +39,4 @@ export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
     consumer.apply(CsrfMiddleware).forRoutes('*');
   }
-  
 }
