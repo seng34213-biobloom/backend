@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Subscribe & Save lifecycle API: create, list, pause, resume, skip next and cancel under `/api/subscriptions`, with the 10% discount locked in and the payment token encrypted with pgcrypto (#14)
+- `address` and `subscription` tables with the pgcrypto extension (#14)
 - Public product catalogue API: `GET /api/products` with category, search and paging, and `GET /api/products/:slug` with live stock per variant; products without sellable stock are hidden (#19)
 - Validation errors now return 422 Unprocessable Entity (#19)
 - FIFO inventory allocation: `InventoryService` with available stock, stock checks and earliest-expiry-first decrements under row-level locks (#10)
