@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Public product catalogue API: `GET /api/products` with category, search and paging, and `GET /api/products/:slug` with live stock per variant; products without sellable stock are hidden (#19)
+- Validation errors now return 422 Unprocessable Entity (#19)
 - FIFO inventory allocation: `InventoryService` with available stock, stock checks and earliest-expiry-first decrements under row-level locks (#10)
 - Prisma schema for products, variants and batches with the first migration (#2)
 - NestJS project setup with Prisma, health check and CI pipeline (#1)
