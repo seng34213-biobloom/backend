@@ -9,6 +9,7 @@ import { CsrfMiddleware } from './common/middleware/csrf.middleware';
 import { HealthModule } from './health/health.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { ProductsModule } from './products/products.module';
 import { RedisModule } from './redis/redis.module';
 
 @Module({
@@ -24,6 +25,7 @@ import { RedisModule } from './redis/redis.module';
     PrismaModule,
     RedisModule,
     InventoryModule,
+    ProductsModule,
     HealthModule,
     AuthModule,
   ],
@@ -37,5 +39,5 @@ export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
     consumer.apply(CsrfMiddleware).forRoutes('*');
   }
-
+  
 }
