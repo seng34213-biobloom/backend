@@ -73,12 +73,14 @@ test/               Integration tests
 
 ## Data model
 
-| Table             | Purpose                                                                             |
-| ----------------- | ----------------------------------------------------------------------------------- |
-| `product`         | Catalogue entry: name, description, base price, unit weight, optional owning seller |
-| `product_variant` | Sellable size of a product with its own SKU, price and weight                       |
-| `product_batch`   | Stock received for a variant, with manufactured and expiry dates                    |
-| `audit_log`       | Who changed what: actor, action, target and metadata                                |
+| Table             | Purpose                                                                                      |
+| ----------------- | -------------------------------------------------------------------------------------------- |
+| `product`         | Catalogue entry: name, description, base price, unit weight, optional owning seller          |
+| `product_variant` | Sellable size of a product with its own SKU, price and weight                                |
+| `product_batch`   | Stock received for a variant, with manufactured and expiry dates                             |
+| `address`         | Shipping address owned by a customer                                                         |
+| `subscription`    | Subscribe & Save plan: variant, address, frequency, locked discount, encrypted payment token |
+| `audit_log`       | Who changed what: actor, action, target and metadata                                         |
 
 Batches are consumed FIFO by expiry date, so `product_batch` is indexed on `expiry_date` and on `(product_variant_id, expiry_date)`. The database rejects negative quantities, a current quantity above the initial quantity, and an expiry date before the manufactured date.
 
@@ -95,13 +97,16 @@ Subscriptions run every 14, 30 or 60 days for 1 to 10 units. Their status moves 
 
 All routes are under `/api`. Invalid input returns `422 Unprocessable Entity`.
 
-| Method | Route                                                    | Description                                                                                                                    |
-| ------ | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| GET    | `/health`                                                | Liveness check                                                                                                                 |
-| GET    | `/products`                                              | Catalogue. Query: `category`, `search`, `page` (default 1), `pageSize` (default 24, max 60). Only products with sellable stock |
-| GET    | `/products/:slug`                                        | Product detail with `stockByVariant` and `earliestExpiryByVariant`                                                             |
-| GET    | `/admin/products/:productId/batches`                     | Batches of a product, earliest expiry first. Admin or owning seller                                                            |
-| POST   | `/admin/products/:productId/variants/:variantId/batches` | Add a batch. Admin or owning seller                                                                                            |
+| Method | Route                                                          | Description                                                                                                                             |
+| ------ | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/health`                                                      | Liveness check                                                                                                                          |
+| GET    | `/products`                                                    | Catalogue. Query: `category`, `search`, `page` (default 1), `pageSize` (default 24, max 60). Only products with sellable stock          |
+| GET    | `/products/:slug`                                              | Product detail with `stockByVariant` and `earliestExpiryByVariant`                                                                      |
+| GET    | `/subscriptions`                                               | Signed-in customer's subscriptions                                                                                                      |
+| POST   | `/subscriptions`                                               | Subscribe: `productVariantId`, `shippingAddressId`, `frequencyDays` (14, 30 or 60), `quantity` (1-10), `paymentToken`, `paymentGateway` |
+| PATCH  | `/subscriptions/:id/pause`, `/resume`, `/skip-next`, `/cancel` | Change a subscription the customer owns                                                                                                 |
+| GET    | `/admin/products/:productId/batches`                           | Batches of a product, earliest expiry first. Admin or owning seller                                                                     |
+| POST   | `/admin/products/:productId/variants/:variantId/batches`       | Add a batch. Admin or owning seller                                                                                                     |
 
 Admins and sellers add stock with `POST /admin/products/:productId/variants/:variantId/batches` (`batchNumber`, `manufacturedDate`, `expiryDate`, `initialQuantity`). The manufactured date cannot be in the future and the expiry date must be tomorrow or later. Sellers can only manage batches of their own products; products without a seller are managed by admins. Every new batch writes a `batch.create` row to `audit_log`.
 
