@@ -1,5 +1,6 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import cookieParser from 'cookie-parser';
 
 const DEFAULT_CORS_ORIGINS = 'http://localhost:3000,http://localhost:3001,http://localhost:3002';
 
@@ -14,13 +15,21 @@ export function configureApp(app: INestApplication): void {
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
-  app.enableCors({ origin: origins, credentials: true });
+  app.enableCors({
+    origin: origins,
+    credentials: true,
+    allowedHeaders: ['content-type', 'x-csrf-token'],
+    exposedHeaders: ['x-csrf-token'],
+  });
+
+  app.use(cookieParser());
 
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      errorHttpStatusCode: 422,
     }),
   );
 
