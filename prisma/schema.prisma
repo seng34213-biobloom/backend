@@ -14,6 +14,86 @@ enum BatchStatus {
   DEPLETED
 }
 
+enum Role {
+  CUSTOMER
+  ADMIN
+  FULFILMENT_STAFF
+  SELLER
+  DELIVERY
+}
+
+enum AdminRole {
+  ADMIN
+  FULFILMENT_STAFF
+}
+
+enum SellerStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+model Customer {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String
+  phone        String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([email])
+  @@map("customer")
+}
+
+model AdminUser {
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  name         String
+  role         AdminRole @default(FULFILMENT_STAFF)
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@index([email])
+  @@map("admin_user")
+}
+
+model Seller {
+  id                String       @id @default(uuid()) @db.Uuid
+  email             String       @unique
+  passwordHash      String       @map("password_hash")
+  businessName      String       @map("business_name")
+  contactName       String       @map("contact_name")
+  phone             String
+  taxId             String?      @map("tax_id")
+  status            SellerStatus @default(PENDING)
+  approvedAt        DateTime?    @map("approved_at")
+  approvedByAdminId String?      @map("approved_by_admin_id") @db.Uuid
+  rejectionReason   String?      @map("rejection_reason")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("seller")
+}
+
+model DeliveryUser {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String
+  phone        String
+  fcmToken     String?  @map("fcm_token")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("delivery_user")
+}
+
 model Product {
   id              String   @id @default(uuid()) @db.Uuid
   name            String
