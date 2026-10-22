@@ -1,6 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AddressesModule } from './addresses/addresses.module';
 import { AuditModule } from './audit/audit.module';
@@ -13,6 +14,7 @@ import { CsrfMiddleware } from './common/middleware/csrf.middleware';
 import { HealthModule } from './health/health.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { OrdersModule } from './orders/orders.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
 import { ShippingModule } from './shipping/shipping.module';
@@ -29,6 +31,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
       { name: 'default', ttl: 60_000, limit: 100 },
       { name: 'auth', ttl: 900_000, limit: 20 },
     ]),
+    EventEmitterModule.forRoot(),
     PrismaModule,
     RedisModule,
     AddressesModule,
@@ -39,6 +42,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     CartModule,
     ShippingModule,
     OrdersModule,
+    NotificationsModule,
     SubscriptionsModule,
     HealthModule,
     AuthModule,
