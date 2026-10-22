@@ -75,6 +75,41 @@ describe('Auth (e2e)', () => {
     expect(res.status).toBe(401);
   });
 
+  it('POST /api/auth/logout clears the cookie and revokes the session token', async () => {
+    const loginCsrf = await csrf();
+    const login = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .set('Cookie', loginCsrf.cookie)
+      .set('x-csrf-token', loginCsrf.token)
+      .send({ email, password })
+      .expect(200);
+    const loginCookies = login.headers['set-cookie'] as unknown as string[];
+    const authCookie = loginCookies.find((cookie) => cookie.startsWith('auth_token='));
+    if (!authCookie) {
+      throw new Error('Login response did not set the auth_token cookie');
+    }
+
+    const logoutCsrf = await csrf();
+    const csrfCookie = logoutCsrf.cookie.find((cookie) => cookie.startsWith('csrf-token='));
+    if (!csrfCookie) {
+      throw new Error('CSRF endpoint did not set the csrf-token cookie');
+    }
+
+    const logout = await request(app.getHttpServer())
+      .post('/api/auth/logout')
+      .set('Cookie', `${authCookie.split(';')[0]}; ${csrfCookie.split(';')[0]}`)
+      .set('x-csrf-token', logoutCsrf.token)
+      .expect(204);
+
+    expect(logout.headers['set-cookie'] as unknown as string[]).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^auth_token=;/)]),
+    );
+    await request(app.getHttpServer())
+      .get('/api/auth/me')
+      .set('Cookie', authCookie.split(';')[0])
+      .expect(401);
+  });
+
   it('POST without a CSRF token returns 403', async () => {
     await request(app.getHttpServer())
       .post('/api/auth/login')
