@@ -21,7 +21,7 @@ async function bootstrap(): Promise<void> {
     }
   };
   app.use(express.json({ verify: verifyRawBody }));
-  app.use(express.urlencoded({ extended: true }));
+  app.use(express.urlencoded({ extended: true, verify: verifyRawBody }));
 
   const port = Number(app.get(ConfigService).get('PORT')) || 4000;
   await app.listen(port);
