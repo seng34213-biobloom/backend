@@ -1,5 +1,8 @@
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import express from 'express';
+import type { Request } from 'express';
+import { createHmac } from 'node:crypto';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
@@ -20,6 +23,7 @@ describe('Atomic checkout (e2e)', () => {
 
   const stamp = `checkout${Date.now()}`;
   const password = 'Sunrise2026';
+  const stripeWebhookSecret = 'whsec_checkout_e2e_test_secret';
   const fixture = {
     customers: [] as string[],
     productId: '',
@@ -78,9 +82,22 @@ describe('Atomic checkout (e2e)', () => {
   };
 
   beforeAll(async () => {
+    process.env.STRIPE_SECRET_KEY ??= 'sk_test_checkout_e2e';
+    process.env.STRIPE_WEBHOOK_SECRET ??= stripeWebhookSecret;
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication({ bodyParser: false });
     configureApp(app);
+    const captureRawBody = (
+      req: Request & { rawBody?: Buffer },
+      _res: unknown,
+      body: Buffer,
+    ) => {
+      if (req.originalUrl?.startsWith('/api/webhooks/')) {
+        req.rawBody = Buffer.from(body);
+      }
+    };
+    app.use(express.json({ verify: captureRawBody }));
+    app.use(express.urlencoded({ extended: true, verify: captureRawBody }));
     await app.init();
     prisma = app.get(PrismaService);
 
@@ -219,6 +236,49 @@ describe('Atomic checkout (e2e)', () => {
     });
     expect(remaining.map((batch) => batch.currentQuantity)).toEqual([0, 1]);
     expect((await fixture.alice.agent.get('/api/cart').expect(200)).body.items).toHaveLength(0);
+
+    const eventBody = JSON.stringify({
+      id: `evt_${stamp}`,
+      object: 'event',
+      api_version: '2024-06-20',
+      created: Math.floor(Date.now() / 1000),
+      data: {
+        object: {
+          id: response.body.payment.gatewayPaymentId,
+          object: 'payment_intent',
+          amount: 675000,
+          amount_received: 675000,
+          currency: 'lkr',
+        },
+      },
+      livemode: false,
+      pending_webhooks: 1,
+      request: { id: null, idempotency_key: null },
+      type: 'payment_intent.succeeded',
+    });
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signature = createHmac('sha256', stripeWebhookSecret)
+      .update(`${timestamp}.${eventBody}`)
+      .digest('hex');
+    const webhookSignature = `t=${timestamp},v1=${signature}`;
+    const webhook = await request(app.getHttpServer())
+      .post('/api/webhooks/stripe')
+      .set('Stripe-Signature', webhookSignature)
+      .set('Content-Type', 'application/json')
+      .send(eventBody)
+      .expect(200);
+    expect(webhook.body).toMatchObject({ status: 'applied', paymentStatus: 'PAID' });
+    await expect(
+      prisma.order.findUniqueOrThrow({ where: { id: response.body.order.id as string } }),
+    ).resolves.toMatchObject({ status: 'PAID', paymentStatus: 'PAID' });
+
+    const duplicate = await request(app.getHttpServer())
+      .post('/api/webhooks/stripe')
+      .set('Stripe-Signature', webhookSignature)
+      .set('Content-Type', 'application/json')
+      .send(eventBody)
+      .expect(200);
+    expect(duplicate.body).toMatchObject({ status: 'duplicate', paymentStatus: 'PAID' });
   });
 
   it('validates empty carts and unknown, malformed, or foreign addresses before ordering', async () => {
