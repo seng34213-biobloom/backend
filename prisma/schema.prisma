@@ -63,6 +63,7 @@ model Customer {
 
   addresses     Address[]
   subscriptions Subscription[]
+  cartItems     CartItem[]
 
   @@index([email])
   @@map("customer")
@@ -200,6 +201,7 @@ model ProductVariant {
   product       Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
   batches       ProductBatch[]
   subscriptions Subscription[]
+  cartItems     CartItem[]
 
   @@index([productId])
   @@map("product_variant")
@@ -253,4 +255,20 @@ model Subscription {
   @@index([status, nextBillingDate])
   @@index([customerId])
   @@map("subscription")
+}
+
+model CartItem {
+  id               String   @id @default(uuid()) @db.Uuid
+  customerId       String   @map("customer_id") @db.Uuid
+  productVariantId String   @map("product_variant_id") @db.Uuid
+  quantity         Int
+  addedAt          DateTime @default(now()) @map("added_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  customer Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  variant  ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, productVariantId])
+  @@index([customerId])
+  @@map("cart_item")
 }

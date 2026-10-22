@@ -9,6 +9,7 @@ import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 import { BatchesModule } from './batches/batches.module';
+import { CartModule } from './cart/cart.module';
 import { CsrfMiddleware } from './common/middleware/csrf.middleware';
 import { HealthModule } from './health/health.module';
 import { InventoryModule } from './inventory/inventory.module';
@@ -39,6 +40,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     InventoryModule,
     ProductsModule,
     BatchesModule,
+    CartModule,
     SubscriptionsModule,
     HealthModule,
     AuthModule,
