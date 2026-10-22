@@ -31,6 +31,13 @@ services:
       timeout: 3s
       retries: 10
 
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    restart: unless-stopped
+    ports:
+      - '1025:1025' # SMTP
+      - '8025:8025' # Web UI and API
+
 volumes:
   postgres_data:
   redis_data:
