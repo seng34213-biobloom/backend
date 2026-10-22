@@ -20,7 +20,7 @@ npm install
 # 2. Create your local env file
 cp .env.example .env
 
-# 3. Start PostgreSQL
+# 3. Start PostgreSQL, Redis and MailHog
 docker compose up -d
 
 # 4. Apply database migrations
@@ -35,6 +35,8 @@ The API runs on http://localhost:4000/api. Check it with:
 ```bash
 curl http://localhost:4000/api/health
 ```
+
+Emails sent in development are caught by MailHog at http://localhost:8025.
 
 ## Scripts
 
@@ -62,6 +64,7 @@ src/
   batches/          Admin and seller batch management
   health/           GET /api/health liveness check
   inventory/        FIFO stock checks and batch allocation
+  notifications/    Domain events and transactional email (MailHog in dev)
   products/         Public product catalogue API
   subscriptions/    Subscribe & Save lifecycle and payment token encryption
   prisma/           PrismaService, available globally
@@ -92,6 +95,16 @@ Subscriptions run every 14, 30 or 60 days for 1 to 10 units. Their status moves 
 
 - `availableStock(variantId)` and `checkStock(variantId, qty)` count only valid batches: not expired, not `DEPLETED`, quantity above zero.
 - `decrementForVariant(variantId, qty, tx)` must run inside a Prisma `$transaction`. It locks the valid batches with `SELECT ... FOR UPDATE`, takes stock earliest-expiry-first, marks emptied batches `DEPLETED` and throws `OutOfStockError` (HTTP 409) when stock is short, which rolls the transaction back.
+
+## Batch expiry sweep
+
+`ExpiryCronService` runs every day at 06:00 UTC (SDS §5.6):
+
+- `ACTIVE` batches that expire within the next 7 days, including today, become `EXPIRING_SOON` and emit `batch.expiringSoon`. Every active admin receives the expiring-soon email.
+- Batches whose expiry date has passed become `EXPIRED` and emit `batch.expired`.
+- `DEPLETED` batches are left alone, and running the sweep again on the same day changes nothing.
+
+Stock queries filter on the expiry date itself, so an expired batch is never sold even before the sweep runs. A failed email is logged and never stops the sweep.
 
 ## API
 

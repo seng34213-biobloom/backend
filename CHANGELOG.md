@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Daily batch expiry sweep at 06:00 UTC: batches within 7 days of expiry become `EXPIRING_SOON` and every active admin is emailed; expired batches become `EXPIRED` (#39)
+- Event-driven email foundation: `EventEmitterModule`, `MailerService` over SMTP and `NotificationsService`, with MailHog in docker-compose and CI (#39)
 - Batch management API for admins and sellers: `POST /api/admin/products/:productId/variants/:variantId/batches` and `GET /api/admin/products/:productId/batches` in FIFO order, with a `batch.create` audit entry (#9)
 - `audit_log` table and `AuditService`, and optional seller ownership on `product` (#9)
 - Subscribe & Save lifecycle API: create, list, pause, resume, skip next and cancel under `/api/subscriptions`, with the 10% discount locked in and the payment token encrypted with pgcrypto (#14)
