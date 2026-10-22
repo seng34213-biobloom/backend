@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Customer shipping addresses, weight-based shipping quotes, payment intents, and atomic FIFO checkout with price, weight, and shipping snapshots (#17)
+- Stripe and PayHere hosted payment intents, signature-verified idempotent webhooks, failure restocking, and order-confirmation email notifications (#21)
 - Global JWT and role guards, Redis-backed logout token revocation, double-submit CSRF protection and auth rate limits of 20 requests per IP per 15 minutes (#5)
 - Admin and seller product/variant management endpoints with ownership checks, audit entries, uniqueness validation and soft deactivation (#12)
 - Batch management API for admins and sellers: `POST /api/admin/products/:productId/variants/:variantId/batches` and `GET /api/admin/products/:productId/batches` in FIFO order, with a `batch.create` audit entry (#9)
