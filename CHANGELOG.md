@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Admin and seller product/variant management endpoints with ownership checks, audit entries, uniqueness validation and soft deactivation (#12)
 - Batch management API for admins and sellers: `POST /api/admin/products/:productId/variants/:variantId/batches` and `GET /api/admin/products/:productId/batches` in FIFO order, with a `batch.create` audit entry (#9)
 - `audit_log` table and `AuditService`, and optional seller ownership on `product` (#9)
 - Subscribe & Save lifecycle API: create, list, pause, resume, skip next and cancel under `/api/subscriptions`, with the 10% discount locked in and the payment token encrypted with pgcrypto (#14)
