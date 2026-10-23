@@ -16,6 +16,8 @@ export type TemplateKey =
   | 'ORDER_DELIVERED'
   | 'SUBSCRIPTION_RENEWED'
   | 'SUBSCRIPTION_CANCELLED'
+  | 'SUBSCRIPTION_STOCK_DELAYED'
+  | 'SUBSCRIPTION_CHARGE_FAILED'
   | 'BATCH_EXPIRING_SOON'
   | 'REFUND_ISSUED'
   | 'SELLER_APPROVED';
@@ -128,6 +130,30 @@ export const TEMPLATES: Record<
         'Cancelled',
         `<p>Your subscription${d.productName ? ` to <strong>${escapeHtml(d.productName)}</strong>` : ''} has been cancelled. No more charges will happen.</p>
          <p>Change your mind? You can start a new one anytime.</p>`,
+      ),
+    }),
+  },
+  SUBSCRIPTION_STOCK_DELAYED: {
+    id: 'd-subscription-stock-delayed',
+    render: (d) => ({
+      subject: 'Your Subscribe & Save delivery is delayed',
+      html: wrap(
+        'Stock delayed',
+        `<p>We couldn't fill this cycle of your subscription${d.productName ? ` to <strong>${escapeHtml(d.productName)}</strong>` : ''}: we have ${escapeHtml(d.available)} of the ${escapeHtml(d.requested)} jar(s) you need in stock.</p>
+         <p><strong>You have not been charged.</strong> We'll try again on your next billing date${d.nextBillingDate ? ` (<strong>${escapeHtml(d.nextBillingDate)}</strong>)` : ''}.</p>
+         ${link(d.manageUrl, 'Manage your subscriptions')}`,
+      ),
+    }),
+  },
+  SUBSCRIPTION_CHARGE_FAILED: {
+    id: 'd-subscription-charge-failed',
+    render: (d) => ({
+      subject: 'We could not charge your Subscribe & Save',
+      html: wrap(
+        'Payment declined',
+        `<p>The automatic charge for your subscription${d.productName ? ` to <strong>${escapeHtml(d.productName)}</strong>` : ''} was declined${d.reason ? `: ${escapeHtml(d.reason)}` : ''}.</p>
+         <p>No order was placed this cycle. Please update your payment method before your next billing date${d.nextBillingDate ? ` (<strong>${escapeHtml(d.nextBillingDate)}</strong>)` : ''}.</p>
+         ${link(d.manageUrl, 'Update your payment method')}`,
       ),
     }),
   },

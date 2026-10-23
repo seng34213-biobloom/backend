@@ -159,6 +159,49 @@ describe('NotificationsService', () => {
       );
     });
 
+    it('tells the customer their delivery is delayed when stock is short', async () => {
+      await emitter.emitAsync(DOMAIN_EVENTS.SUBSCRIPTION_STOCK_DELAYED, {
+        subscriptionId: 's-1',
+        customerId: 'c-1',
+        productVariantId: 'v-1',
+        requested: 3,
+        available: 1,
+      });
+
+      expect(mailer.send).toHaveBeenCalledWith({
+        to: 'customer@example.com',
+        template: 'SUBSCRIPTION_STOCK_DELAYED',
+        data: {
+          subscriptionId: 's-1',
+          productName: 'Wild Honey (250g)',
+          nextBillingDate: '2026-11-20',
+          requested: 3,
+          available: 1,
+          manageUrl: 'https://biobloom.lk/account/subscriptions',
+        },
+      });
+    });
+
+    it('tells the customer when the stored card is declined', async () => {
+      await emitter.emitAsync(DOMAIN_EVENTS.SUBSCRIPTION_CHARGE_FAILED, {
+        subscriptionId: 's-1',
+        customerId: 'c-1',
+        reason: 'card_declined',
+      });
+
+      expect(mailer.send).toHaveBeenCalledWith({
+        to: 'customer@example.com',
+        template: 'SUBSCRIPTION_CHARGE_FAILED',
+        data: {
+          subscriptionId: 's-1',
+          productName: 'Wild Honey (250g)',
+          nextBillingDate: '2026-11-20',
+          reason: 'card_declined',
+          manageUrl: 'https://biobloom.lk/account/subscriptions',
+        },
+      });
+    });
+
     it('skips customer emails when the customer no longer exists', async () => {
       (prisma.customer.findUnique as jest.Mock).mockResolvedValue(null);
 
@@ -178,6 +221,18 @@ describe('NotificationsService', () => {
         customerId: 'gone',
         orderId: 'o',
         amount: '1',
+      });
+      await emitter.emitAsync(DOMAIN_EVENTS.SUBSCRIPTION_STOCK_DELAYED, {
+        subscriptionId: 's-1',
+        customerId: 'gone',
+        productVariantId: 'v-1',
+        requested: 1,
+        available: 0,
+      });
+      await emitter.emitAsync(DOMAIN_EVENTS.SUBSCRIPTION_CHARGE_FAILED, {
+        subscriptionId: 's-1',
+        customerId: 'gone',
+        reason: 'x',
       });
 
       expect(mailer.send).not.toHaveBeenCalled();
@@ -318,6 +373,16 @@ describe('NotificationsService', () => {
       ['emitOrderDelivered', DOMAIN_EVENTS.ORDER_DELIVERED, { orderId: 'o' }],
       ['emitSubscriptionRenewed', DOMAIN_EVENTS.SUBSCRIPTION_RENEWED, { subscriptionId: 's' }],
       ['emitSubscriptionCancelled', DOMAIN_EVENTS.SUBSCRIPTION_CANCELLED, { subscriptionId: 's' }],
+      [
+        'emitSubscriptionStockDelayed',
+        DOMAIN_EVENTS.SUBSCRIPTION_STOCK_DELAYED,
+        { subscriptionId: 's' },
+      ],
+      [
+        'emitSubscriptionChargeFailed',
+        DOMAIN_EVENTS.SUBSCRIPTION_CHARGE_FAILED,
+        { subscriptionId: 's' },
+      ],
       ['emitRefundApproved', DOMAIN_EVENTS.REFUND_APPROVED, { refundRequestId: 'r' }],
       ['emitRefundRejected', DOMAIN_EVENTS.REFUND_REJECTED, { refundRequestId: 'r' }],
       ['emitBatchExpiringSoon', DOMAIN_EVENTS.BATCH_EXPIRING_SOON, { batchId: 'b' }],

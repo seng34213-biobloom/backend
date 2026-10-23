@@ -388,6 +388,33 @@ describe('Notifications and the batch expiry sweep (e2e)', () => {
       );
     });
 
+    it('emails the customer when a renewal is delayed for stock or the charge fails', async () => {
+      notifications.emitSubscriptionStockDelayed({
+        subscriptionId: ids.subscription,
+        customerId: ids.customer,
+        productVariantId: 'v',
+        requested: 3,
+        available: 1,
+      });
+      notifications.emitSubscriptionChargeFailed({
+        subscriptionId: ids.subscription,
+        customerId: ids.customer,
+        reason: 'card_declined',
+      });
+
+      const mails = await waitFor(
+        async () =>
+          (await mailsTo(customerEmail)).filter((m) =>
+            ['d-subscription-stock-delayed', 'd-subscription-charge-failed'].includes(m.template),
+          ),
+        2,
+      );
+      expect(mails.map((m) => `${m.template} | ${m.subject}`).sort()).toEqual([
+        'd-subscription-charge-failed | We could not charge your Subscribe & Save',
+        'd-subscription-stock-delayed | Your Subscribe & Save delivery is delayed',
+      ]);
+    });
+
     it('confirms a cancellation by email when the customer cancels', async () => {
       await app.get(SubscriptionsService).cancel(ids.customer, ids.subscription);
 

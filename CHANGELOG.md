@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Transactional email for order confirmed, shipped and delivered, subscription renewed, cancelled, stock delayed and charge failed, refund issued and seller approved, sent from domain events through `NotificationsService` (#43)
+- Cancelling a subscription now sends the cancellation confirmation email (#43)
 - Customer shipping addresses, weight-based shipping quotes, payment intents, and atomic FIFO checkout with price, weight, and shipping snapshots (#17)
 - Stripe and PayHere hosted payment intents, signature-verified idempotent webhooks, failure restocking, and order-confirmation email notifications (#21)
 - Daily batch expiry sweep at 06:00 UTC: batches within 7 days of expiry become `EXPIRING_SOON` and every active admin is emailed; expired batches become `EXPIRED` (#39)
@@ -23,3 +25,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - FIFO inventory allocation: `InventoryService` with available stock, stock checks and earliest-expiry-first decrements under row-level locks (#10)
 - Prisma schema for products, variants and batches with the first migration (#2)
 - NestJS project setup with Prisma, health check and CI pipeline (#1)
+
+### Fixed
+
+- Restored a single notifications module after the payment webhooks merge left duplicate mailer, listener and template code that stopped `develop` from building (#43)
+
+### Changed
+
+- Every value placed in an email is now HTML-escaped, and `nodemailer` is upgraded to 10 (#43)

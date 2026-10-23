@@ -28,6 +28,14 @@ describe('templates', () => {
     ['ORDER_DELIVERED', { orderId: 'o-1', orderUrl: XSS }],
     ['SUBSCRIPTION_RENEWED', { orderId: 'o-1', amount: XSS, currency: XSS, manageUrl: XSS }],
     ['SUBSCRIPTION_CANCELLED', { productName: XSS }],
+    [
+      'SUBSCRIPTION_STOCK_DELAYED',
+      { productName: XSS, available: XSS, requested: 2, nextBillingDate: XSS, manageUrl: XSS },
+    ],
+    [
+      'SUBSCRIPTION_CHARGE_FAILED',
+      { productName: XSS, reason: XSS, nextBillingDate: XSS, manageUrl: XSS },
+    ],
     ['BATCH_EXPIRING_SOON', { batchNumber: XSS, productVariantId: XSS, currentQuantity: XSS }],
     ['REFUND_ISSUED', { orderId: 'o-1', amount: XSS, currency: XSS }],
     ['SELLER_APPROVED', { businessName: XSS, portalUrl: XSS }],
@@ -47,6 +55,13 @@ describe('templates', () => {
     expect(formatOrderReference(123)).toBe('BB-000123');
     expect(formatOrderReference(undefined, '9f8e7d6c-1234-5678')).toBe('#9f8e7d6c');
     expect(formatOrderReference(null)).toBe('your order');
+  });
+
+  it('reassures a delayed subscriber that they were not charged', () => {
+    const rendered = TEMPLATES.SUBSCRIPTION_STOCK_DELAYED.render({ available: 1, requested: 3 });
+    expect(rendered.html).toContain('we have 1 of the 3 jar(s)');
+    expect(rendered.html).toContain('You have not been charged.');
+    expect(rendered.html).not.toContain(' to <strong>');
   });
 
   it('only renders links that have a URL', () => {

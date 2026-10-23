@@ -15,8 +15,8 @@ import type { TemplateKey } from './templates.config';
  * failure can never block or fail the request that raised the event.
  *
  * Who gets what:
- *   customer — order.confirmed/shipped/delivered, subscription.renewed/cancelled,
- *              refund.approved
+ *   customer — order.confirmed/shipped/delivered, subscription.renewed/cancelled/
+ *              stockDelayed/chargeFailed, refund.approved
  *   seller   — seller.approved
  *   admins   — batch.expiringSoon
  *   log only — seller.applied, seller.rejected, refund.rejected
@@ -31,6 +31,8 @@ export const DOMAIN_EVENTS = {
   SELLER_REJECTED: 'seller.rejected',
   SUBSCRIPTION_RENEWED: 'subscription.renewed',
   SUBSCRIPTION_CANCELLED: 'subscription.cancelled',
+  SUBSCRIPTION_STOCK_DELAYED: 'subscription.stockDelayed',
+  SUBSCRIPTION_CHARGE_FAILED: 'subscription.chargeFailed',
   ORDER_CONFIRMED: 'order.confirmed',
   ORDER_SHIPPED: 'order.shipped',
   ORDER_DELIVERED: 'order.delivered',
@@ -70,6 +72,18 @@ export interface SubscriptionRenewedPayload {
 export interface SubscriptionCancelledPayload {
   subscriptionId: string;
   customerId: string;
+}
+export interface SubscriptionStockDelayedPayload {
+  subscriptionId: string;
+  customerId: string;
+  productVariantId: string;
+  requested: number;
+  available: number;
+}
+export interface SubscriptionChargeFailedPayload {
+  subscriptionId: string;
+  customerId: string;
+  reason: string;
 }
 export interface OrderConfirmedPayload {
   orderId: string;
@@ -203,6 +217,46 @@ export class NotificationsService implements OnModuleInit {
       });
     });
 
+    this.on(
+      DOMAIN_EVENTS.SUBSCRIPTION_STOCK_DELAYED,
+      async (p: SubscriptionStockDelayedPayload) => {
+        const email = await this.customerEmail(p.customerId);
+        if (!email) return;
+        const sub = await this.subscriptionContext(p.subscriptionId);
+        await this.mailer.send({
+          to: email,
+          template: 'SUBSCRIPTION_STOCK_DELAYED',
+          data: {
+            subscriptionId: p.subscriptionId,
+            productName: sub.productName,
+            nextBillingDate: sub.nextBillingDate,
+            requested: p.requested,
+            available: p.available,
+            manageUrl: this.subscriptionsUrl(),
+          },
+        });
+      },
+    );
+    this.on(
+      DOMAIN_EVENTS.SUBSCRIPTION_CHARGE_FAILED,
+      async (p: SubscriptionChargeFailedPayload) => {
+        const email = await this.customerEmail(p.customerId);
+        if (!email) return;
+        const sub = await this.subscriptionContext(p.subscriptionId);
+        await this.mailer.send({
+          to: email,
+          template: 'SUBSCRIPTION_CHARGE_FAILED',
+          data: {
+            subscriptionId: p.subscriptionId,
+            productName: sub.productName,
+            nextBillingDate: sub.nextBillingDate,
+            reason: p.reason,
+            manageUrl: this.subscriptionsUrl(),
+          },
+        });
+      },
+    );
+
     // ----- refunds -----------------------------------------------------------
     this.on(DOMAIN_EVENTS.REFUND_APPROVED, async (p: RefundApprovedPayload) => {
       const email = await this.customerEmail(p.customerId);
@@ -257,6 +311,12 @@ export class NotificationsService implements OnModuleInit {
   }
   emitSubscriptionCancelled(p: SubscriptionCancelledPayload): void {
     this.emitter.emit(DOMAIN_EVENTS.SUBSCRIPTION_CANCELLED, p);
+  }
+  emitSubscriptionStockDelayed(p: SubscriptionStockDelayedPayload): void {
+    this.emitter.emit(DOMAIN_EVENTS.SUBSCRIPTION_STOCK_DELAYED, p);
+  }
+  emitSubscriptionChargeFailed(p: SubscriptionChargeFailedPayload): void {
+    this.emitter.emit(DOMAIN_EVENTS.SUBSCRIPTION_CHARGE_FAILED, p);
   }
   emitRefundApproved(p: RefundApprovedPayload): void {
     this.emitter.emit(DOMAIN_EVENTS.REFUND_APPROVED, p);
