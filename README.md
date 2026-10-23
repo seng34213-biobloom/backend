@@ -57,6 +57,7 @@ Emails sent in development are caught by MailHog at http://localhost:8025.
 
 ```
 src/
+  analytics/        Admin dashboard KPIs, revenue series and top sellers
   app.module.ts     Root module
   app.setup.ts      Global prefix, CORS and validation, shared with e2e tests
   audit/            Append-only audit log for privileged changes
@@ -138,6 +139,9 @@ All routes are under `/api`. Invalid input returns `422 Unprocessable Entity`.
 | PATCH  | `/subscriptions/:id/pause`, `/resume`, `/skip-next`, `/cancel` | Change a subscription the customer owns                                                                                                 |
 | GET    | `/admin/products/:productId/batches`                           | Batches of a product, earliest expiry first. Admin or owning seller                                                                     |
 | POST   | `/admin/products/:productId/variants/:variantId/batches`       | Add a batch. Admin or owning seller                                                                                                     |
+| GET    | `/admin/analytics/dashboard`                                   | Today's revenue, pending orders, active subscriptions, batches expiring within 7 days. Admin only                                       |
+| GET    | `/admin/analytics/revenue-series`                              | Daily revenue for the last `days` days (default 30, max 365), one point per day. Admin only                                             |
+| GET    | `/admin/analytics/top-selling`                                 | Best-selling products this month by revenue, `limit` 1–50 (default 5). Admin only                                                       |
 
 Admins and sellers add stock with `POST /admin/products/:productId/variants/:variantId/batches` (`batchNumber`, `manufacturedDate`, `expiryDate`, `initialQuantity`). The manufactured date cannot be in the future and the expiry date must be tomorrow or later. Sellers can only manage batches of their own products; products without a seller are managed by admins. Every new batch writes a `batch.create` row to `audit_log`.
 
