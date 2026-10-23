@@ -8,8 +8,17 @@ function startOfTodayUtc(): Date {
   return d;
 }
 
-/** Cancelled and refunded orders never count as revenue. "Today" and the series buckets are UTC days. */
-const EXCLUDED_STATUSES = [OrderStatus.CANCELLED, OrderStatus.REFUNDED];
+/**
+ * Only orders that were actually paid count as revenue: unpaid
+ * (PENDING_PAYMENT), cancelled and refunded orders are excluded. "Today" and
+ * the series buckets are UTC days (ADR-008).
+ */
+const REVENUE_STATUSES = [
+  OrderStatus.PAID,
+  OrderStatus.PACKING,
+  OrderStatus.SHIPPED,
+  OrderStatus.DELIVERED,
+];
 
 function addDaysUtc(base: Date, days: number): Date {
   const d = new Date(base);
@@ -53,7 +62,7 @@ export class AnalyticsService {
       this.prisma.order.aggregate({
         where: {
           placedAt: { gte: today, lt: tomorrow },
-          status: { notIn: EXCLUDED_STATUSES },
+          status: { in: REVENUE_STATUSES },
         },
         _sum: { totalAmount: true },
       }),
@@ -79,14 +88,14 @@ export class AnalyticsService {
     };
   }
 
-  /** Daily revenue series for the last `days` days, one zero-filled point per day. */
-  async revenueSeries(days = 14): Promise<RevenuePoint[]> {
+  /** Daily revenue series for the last `days` days (SDS §6.5 default 30), zero-filled. */
+  async revenueSeries(days = 30): Promise<RevenuePoint[]> {
     const today = startOfTodayUtc();
     const from = addDaysUtc(today, -(days - 1));
     const orders = await this.prisma.order.findMany({
       where: {
         placedAt: { gte: from, lt: addDaysUtc(today, 1) },
-        status: { notIn: EXCLUDED_STATUSES },
+        status: { in: REVENUE_STATUSES },
       },
       select: { placedAt: true, totalAmount: true },
     });
@@ -120,7 +129,7 @@ export class AnalyticsService {
       where: {
         order: {
           placedAt: { gte: monthStart, lt: monthEnd },
-          status: { notIn: EXCLUDED_STATUSES },
+          status: { in: REVENUE_STATUSES },
         },
       },
       include: {

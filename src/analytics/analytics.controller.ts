@@ -13,9 +13,10 @@ export class AnalyticsController {
     return this.analytics.dashboard();
   }
 
+  /** SDS §6.5 — 30-day trend by default; 1–365 days accepted. */
   @Get('revenue-series')
-  revenue() {
-    return this.analytics.revenueSeries();
+  revenue(@Query('days', new DefaultValuePipe(30), ParseIntPipe) days: number) {
+    return this.analytics.revenueSeries(Math.min(365, Math.max(1, days)));
   }
 
   @Get('top-selling')
