@@ -34,12 +34,20 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      mailhog:
+        image: mailhog/mailhog:v1.0.1
+        ports:
+          - 1025:1025
+          - 8025:8025
 
     env:
       DATABASE_URL: postgresql://biobloom:biobloom_dev@localhost:5432/biobloom_test?schema=public
       REDIS_URL: redis://localhost:6379
       JWT_SECRET: ci-only-secret-at-least-32-characters-long
       SUBSCRIPTION_TOKEN_ENC_KEY: ci-only-subscription-token-key
+      SMTP_HOST: localhost
+      SMTP_PORT: 1025
+      MAILHOG_BASE_URL: http://localhost:8025
 
     steps:
       - name: Checkout
