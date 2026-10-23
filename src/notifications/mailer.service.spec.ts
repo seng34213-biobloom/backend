@@ -56,6 +56,31 @@ describe('MailerService', () => {
     expect(out).toEqual({ accepted: false, templateId: TEMPLATES.BATCH_EXPIRING_SOON.id });
   });
 
+  it.each(Object.keys(TEMPLATES) as Array<keyof typeof TEMPLATES>)(
+    'sends %s with its template header',
+    async (template) => {
+      const out = await svc.send({ to: 'a@b.com', template, data: { orderId: 'o-1' } });
+
+      expect(out).toEqual({ accepted: true, templateId: TEMPLATES[template].id });
+      const args = sendMailMock.mock.calls[0][0];
+      expect(args.subject).toBeTruthy();
+      expect(args.html).toBeTruthy();
+      expect(args.headers['X-Biobloom-Template']).toBe(TEMPLATES[template].id);
+    },
+  );
+
+  it('returns accepted=false without sending when a template fails to render', async () => {
+    const spy = jest.spyOn(TEMPLATES.ORDER_SHIPPED, 'render').mockImplementation(() => {
+      throw new Error('bad data');
+    });
+
+    const out = await svc.send({ to: 'a@b.com', template: 'ORDER_SHIPPED', data: {} });
+
+    expect(out).toEqual({ accepted: false, templateId: TEMPLATES.ORDER_SHIPPED.id });
+    expect(sendMailMock).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
   it('returns accepted=false for an unknown template without sending', async () => {
     const out = await svc.send({
       to: 'admin@biobloom.lk',

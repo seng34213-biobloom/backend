@@ -18,8 +18,9 @@ export interface SendArgs {
  *       way the call site doesn't change — handlers just call
  *       `mailer.send({to, template, data})`.
  *
- * Failures are logged but never thrown — the SDS asks for async delivery
- * that cannot block the request thread.
+ * Failures (unknown template, render error, SMTP refusal) are logged but
+ * never thrown — the SDS asks for async delivery that cannot block the
+ * request thread.
  */
 @Injectable()
 export class MailerService {
@@ -50,7 +51,13 @@ export class MailerService {
       this.logger.error(`Unknown template ${args.template}`);
       return { accepted: false, templateId: '' };
     }
-    const message: RenderedMessage = tpl.render(args.data);
+    let message: RenderedMessage;
+    try {
+      message = tpl.render(args.data);
+    } catch (e) {
+      this.logger.error(`Mail ${args.template} render FAILED: ${(e as Error).message}`);
+      return { accepted: false, templateId: tpl.id };
+    }
     try {
       await this.transporter.sendMail({
         from: this.from,
