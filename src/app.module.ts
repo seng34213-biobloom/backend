@@ -2,6 +2,7 @@ import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AddressesModule } from './addresses/addresses.module';
 import { AuditModule } from './audit/audit.module';
@@ -32,10 +33,15 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
       { name: 'auth', ttl: 900_000, limit: 20 },
     ]),
     EventEmitterModule.forRoot(),
+    // SDS §4.2 — feature modules emit domain events; NotificationsService sends the emails.
+    EventEmitterModule.forRoot(),
+    // SDS §5.6 — daily scheduled jobs such as the batch expiry sweep.
+    ScheduleModule.forRoot(),
     PrismaModule,
     RedisModule,
     AddressesModule,
     AuditModule,
+    NotificationsModule,
     InventoryModule,
     ProductsModule,
     BatchesModule,
