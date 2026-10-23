@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, SubscriptionStatus } from '@prisma/client';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TokenCipherService } from './token-cipher.service';
 import type { CreateSubscriptionDto } from './dto/create-subscription.dto';
@@ -45,6 +46,7 @@ export class SubscriptionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cipher: TokenCipherService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async create(customerId: string, dto: CreateSubscriptionDto) {
@@ -150,6 +152,8 @@ export class SubscriptionsService {
       },
       select: this.publicSelect(),
     });
+    // SDS §7.5 — confirm the cancellation by email.
+    this.notifications.emitSubscriptionCancelled({ subscriptionId: sub.id, customerId });
     return this.toPublic(updated);
   }
 

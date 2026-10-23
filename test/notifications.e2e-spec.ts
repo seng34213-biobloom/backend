@@ -5,10 +5,12 @@ import * as bcrypt from 'bcryptjs';
 import { AppModule } from '../src/app.module';
 import { ExpiryCronService } from '../src/batches/expiry-cron.service';
 import { InventoryService } from '../src/inventory/inventory.service';
+import { NotificationsService } from '../src/notifications/notifications.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { SubscriptionsService } from '../src/subscriptions/subscriptions.service';
 
 /**
- * Daily expiry sweep against Postgres, with alert emails checked in MailHog
+ * Domain events against Postgres, with the resulting emails checked in MailHog
  * through its HTTP API (port 8025 in docker-compose.yml and CI).
  */
 const MAILHOG = process.env.MAILHOG_BASE_URL ?? 'http://localhost:8025';
@@ -24,31 +26,58 @@ interface Mail {
   template: string;
 }
 
-async function mailsContaining(marker: string): Promise<Mail[]> {
+// MailHog returns non-ASCII subjects as RFC 2047 encoded words (=?UTF-8?Q?...?=)
+function decodeHeader(value: string): string {
+  return value
+    .replace(/\?=\s+=\?/g, '?==?')
+    .replace(/=\?UTF-8\?([QB])\?([^?]*)\?=/gi, (_match, encoding: string, text: string) =>
+      encoding.toUpperCase() === 'B'
+        ? Buffer.from(text, 'base64').toString('utf8')
+        : Buffer.from(
+            text
+              .replace(/_/g, ' ')
+              .replace(/=([0-9A-F]{2})/gi, (_hex, code: string) =>
+                String.fromCharCode(parseInt(code, 16)),
+              ),
+            'latin1',
+          ).toString('utf8'),
+    );
+}
+
+async function allMails(): Promise<Mail[]> {
   const res = await fetch(`${MAILHOG}/api/v2/messages?limit=500`);
   const json = (await res.json()) as { items: MailHogItem[] };
-  return json.items
-    .map((m) => ({
-      to: m.Content.Headers.To?.[0] ?? '',
-      subject: m.Content.Headers.Subject?.[0] ?? '',
-      template: m.Content.Headers['X-Biobloom-Template']?.[0] ?? '',
-    }))
-    .filter((m) => m.subject.includes(marker));
+  return json.items.map((m) => ({
+    to: m.Content.Headers.To?.[0] ?? '',
+    subject: decodeHeader(m.Content.Headers.Subject?.[0] ?? ''),
+    template: m.Content.Headers['X-Biobloom-Template']?.[0] ?? '',
+  }));
+}
+
+async function mailsContaining(marker: string): Promise<Mail[]> {
+  return (await allMails()).filter((m) => m.subject.includes(marker));
+}
+
+async function mailsTo(marker: string): Promise<Mail[]> {
+  return (await allMails()).filter((m) => m.to.includes(marker));
 }
 
 // Listeners send asynchronously after emit(), so poll until the expected count arrives
-async function waitForMails(marker: string, expected: number): Promise<Mail[]> {
+async function waitFor(find: () => Promise<Mail[]>, expected: number): Promise<Mail[]> {
   let mails: Mail[] = [];
   for (let i = 0; i < 40 && mails.length < expected; i++) {
-    mails = await mailsContaining(marker);
+    mails = await find();
     if (mails.length < expected) await new Promise((r) => setTimeout(r, 150));
   }
   return mails;
 }
 
+const waitForMails = (marker: string, expected: number) =>
+  waitFor(() => mailsContaining(marker), expected);
+
 const settle = () => new Promise((r) => setTimeout(r, 1000));
 
-describe('Batch expiry sweep and admin alerts (e2e)', () => {
+describe('Notifications and the batch expiry sweep (e2e)', () => {
   const stamp = `sweep${Date.now()}`;
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
@@ -257,6 +286,149 @@ describe('Batch expiry sweep and admin alerts (e2e)', () => {
         'EXPIRING_SOON',
       );
       expect(await mailsContaining(`${stamp}-OFFLINE`)).toHaveLength(0);
+    });
+  });
+
+  describe('transactional emails', () => {
+    let app: INestApplication;
+    let prisma: PrismaService;
+    let notifications: NotificationsService;
+    const customerEmail = `shopper.${stamp}@example.com`;
+    const sellerEmail = `kitchen.${stamp}@example.com`;
+    const ids = { customer: '', order: '', subscription: '' };
+
+    beforeAll(async () => {
+      app = await boot();
+      prisma = app.get(PrismaService);
+      notifications = app.get(NotificationsService);
+
+      const customer = await prisma.customer.create({
+        data: {
+          email: customerEmail,
+          passwordHash: await bcrypt.hash('Harvest2026', 4),
+          name: 'Shopper',
+        },
+      });
+      const address = await prisma.address.create({
+        data: {
+          customerId: customer.id,
+          line1: '12 Temple Road',
+          city: 'Kelaniya',
+          district: 'Gampaha',
+          postalCode: '11600',
+        },
+      });
+      const variantId = await createVariant(prisma, 'mail');
+      const order = await prisma.order.create({
+        data: {
+          customerId: customer.id,
+          shippingAddressId: address.id,
+          totalAmount: '1500.00',
+          totalWeight: '500',
+          shippingFee: '250.00',
+          currency: 'LKR',
+        },
+      });
+      const subscription = await prisma.subscription.create({
+        data: {
+          customerId: customer.id,
+          productVariantId: variantId,
+          shippingAddressId: address.id,
+          frequencyDays: 30,
+          discountRate: '0.1000',
+          nextBillingDate: daysFromToday(30),
+          paymentTokenEncrypted: new Uint8Array([1, 2, 3]),
+          paymentGateway: 'STRIPE',
+        },
+      });
+      ids.customer = customer.id;
+      ids.order = order.id;
+      ids.subscription = subscription.id;
+    });
+
+    afterAll(async () => {
+      if (prisma) {
+        await prisma.subscription.deleteMany({ where: { customerId: ids.customer } });
+        await prisma.order.deleteMany({ where: { customerId: ids.customer } });
+        await prisma.customer.deleteMany({ where: { email: customerEmail } });
+        await prisma.product.deleteMany({ where: { slug: { startsWith: stamp } } });
+      }
+      await app?.close();
+    });
+
+    it('emails the customer about order, subscription and refund events', async () => {
+      const ref = `#${ids.order.slice(0, 8)}`;
+      notifications.emitOrderConfirmed({ orderId: ids.order });
+      notifications.emitOrderShipped({ orderId: ids.order, actorId: 'staff' });
+      notifications.emitOrderDelivered({ orderId: ids.order, actorId: 'rider' });
+      notifications.emitSubscriptionRenewed({
+        subscriptionId: ids.subscription,
+        customerId: ids.customer,
+        orderId: ids.order,
+        amount: '1350.00',
+        currency: 'LKR',
+      });
+      notifications.emitRefundApproved({
+        refundRequestId: 'refund-1',
+        customerId: ids.customer,
+        orderId: ids.order,
+        amount: '450.00',
+      });
+
+      const mails = await waitFor(() => mailsTo(customerEmail), 5);
+
+      expect(mails.map((m) => `${m.template} | ${m.subject}`).sort()).toEqual(
+        [
+          `d-order-confirmed | Order ${ref} confirmed`,
+          `d-order-shipped | Order ${ref} has shipped`,
+          `d-order-delivered | Order ${ref} delivered — how was it?`,
+          'd-subscription-renewed | Your Subscribe & Save renewed',
+          'd-refund-issued | Your refund is on the way',
+        ].sort(),
+      );
+    });
+
+    it('confirms a cancellation by email when the customer cancels', async () => {
+      await app.get(SubscriptionsService).cancel(ids.customer, ids.subscription);
+
+      const mails = await waitFor(
+        async () =>
+          (await mailsTo(customerEmail)).filter((m) => m.subject === 'Subscription cancelled'),
+        1,
+      );
+      expect(mails).toEqual([
+        {
+          to: customerEmail,
+          subject: 'Subscription cancelled',
+          template: 'd-subscription-cancelled',
+        },
+      ]);
+    });
+
+    it('welcomes an approved seller', async () => {
+      notifications.emitSellerApproved({
+        sellerId: 'seller-1',
+        email: sellerEmail,
+        businessName: 'Kitchen Amma',
+        approvedByAdminId: 'admin-1',
+      });
+
+      const mails = await waitFor(() => mailsTo(sellerEmail), 1);
+      expect(mails.map((m) => m.template)).toEqual(['d-seller-approved']);
+    });
+
+    it('sends nothing for events that are only logged', async () => {
+      const before = (await mailsTo(stamp)).length;
+      notifications.emitSellerApplied({ sellerId: 's', email: sellerEmail, businessName: 'X' });
+      notifications.emitRefundRejected({
+        refundRequestId: 'r',
+        customerId: ids.customer,
+        orderId: ids.order,
+        reason: 'Too late',
+      });
+      await settle();
+
+      expect(await mailsTo(stamp)).toHaveLength(before);
     });
   });
 });

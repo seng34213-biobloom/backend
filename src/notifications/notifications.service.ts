@@ -1,32 +1,99 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { AdminRole } from '@prisma/client';
+import { AdminRole, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailerService } from './mailer.service';
+import type { TemplateKey } from './templates.config';
 
 /**
  * SDS §4.2 NotificationService — async dispatch via EventEmitter2.
  *
- * Feature modules emit domain events and return; the listeners here send the
- * emails. Each handler is `async` and catches its own errors so a recipient
- * lookup or mail failure can never stall or fail the code that emitted it.
+ * Feature modules call the typed `emit…` helpers and return; the listeners
+ * registered in `onModuleInit` look up recipients and send the email. Each
+ * handler catches its own errors and MailerService never throws, so a mail
+ * failure can never block or fail the request that raised the event.
  *
- * Current listeners:
- *   OrderConfirmed    → customer (fires from the payment webhook)
- *   BatchExpiringSoon → every active admin (operations alert)
+ * Who gets what:
+ *   customer — order.confirmed/shipped/delivered, subscription.renewed/cancelled,
+ *              refund.approved
+ *   seller   — seller.approved
+ *   admins   — batch.expiringSoon
+ *   log only — seller.applied, seller.rejected, refund.rejected
+ *
+ * Pitfall: EventEmitter2 is in-process with no retry, so a crash between the
+ * database commit and the send loses that email.
  */
 
 export const DOMAIN_EVENTS = {
+  SELLER_APPLIED: 'seller.applied',
+  SELLER_APPROVED: 'seller.approved',
+  SELLER_REJECTED: 'seller.rejected',
+  SUBSCRIPTION_RENEWED: 'subscription.renewed',
+  SUBSCRIPTION_CANCELLED: 'subscription.cancelled',
   ORDER_CONFIRMED: 'order.confirmed',
+  ORDER_SHIPPED: 'order.shipped',
+  ORDER_DELIVERED: 'order.delivered',
+  REFUND_APPROVED: 'refund.approved',
+  REFUND_REJECTED: 'refund.rejected',
+  /** Raised by the daily expiry sweep (batches/expiry-cron.service.ts). */
   BATCH_EXPIRING_SOON: 'batch.expiringSoon',
   BATCH_EXPIRED: 'batch.expired',
 } as const;
 export type DomainEvent = (typeof DOMAIN_EVENTS)[keyof typeof DOMAIN_EVENTS];
 
+export interface SellerAppliedPayload {
+  sellerId: string;
+  email: string;
+  businessName: string;
+}
+export interface SellerApprovedPayload {
+  sellerId: string;
+  email: string;
+  businessName: string;
+  approvedByAdminId: string;
+}
+export interface SellerRejectedPayload {
+  sellerId: string;
+  email: string;
+  businessName: string;
+  rejectedByAdminId: string;
+  reason: string;
+}
+export interface SubscriptionRenewedPayload {
+  subscriptionId: string;
+  customerId: string;
+  orderId: string;
+  amount: string;
+  currency: string;
+}
+export interface SubscriptionCancelledPayload {
+  subscriptionId: string;
+  customerId: string;
+}
 export interface OrderConfirmedPayload {
   orderId: string;
 }
-
+export interface OrderShippedPayload {
+  orderId: string;
+  actorId: string;
+}
+export interface OrderDeliveredPayload {
+  orderId: string;
+  actorId: string;
+}
+export interface RefundApprovedPayload {
+  refundRequestId: string;
+  customerId: string;
+  orderId: string;
+  amount: string;
+}
+export interface RefundRejectedPayload {
+  refundRequestId: string;
+  customerId: string;
+  orderId: string;
+  reason: string;
+}
 export interface BatchExpiringSoonPayload {
   batchId: string;
   productVariantId: string;
@@ -35,61 +102,173 @@ export interface BatchExpiringSoonPayload {
   currentQuantity: number;
   daysUntilExpiry: number;
 }
+export interface BatchExpiredPayload {
+  batchId: string;
+  productVariantId: string;
+  batchNumber: string;
+  expiryDate: Date | string;
+  currentQuantity: number;
+}
+
+interface OrderContext {
+  orderId: string;
+  email: string;
+  totalAmount: string;
+  currency: string;
+}
+
+interface SubscriptionContext {
+  productName: string | null;
+  nextBillingDate: string | null;
+}
 
 @Injectable()
 export class NotificationsService implements OnModuleInit {
   private readonly logger = new Logger(NotificationsService.name);
+  private readonly storefrontUrl: string;
+  private readonly sellerUrl: string;
 
   constructor(
     private readonly emitter: EventEmitter2,
     private readonly mailer: MailerService,
     private readonly prisma: PrismaService,
-  ) {}
+    config: ConfigService,
+  ) {
+    this.storefrontUrl = trimSlash(config.get<string>('STOREFRONT_URL') ?? 'http://localhost:3000');
+    this.sellerUrl = trimSlash(config.get<string>('SELLER_PORTAL_URL') ?? 'http://localhost:3002');
+  }
 
   onModuleInit(): void {
-    this.on(DOMAIN_EVENTS.ORDER_CONFIRMED, async (p: OrderConfirmedPayload) => {
-      const order = await this.prisma.order.findUnique({
-        where: { id: p.orderId },
-        select: {
-          id: true,
-          totalAmount: true,
-          currency: true,
-          customer: { select: { email: true } },
-        },
-      });
-      if (!order) {
-        this.logger.error(`Cannot send confirmation email: order ${p.orderId} not found`);
-        return;
-      }
+    // ----- sellers -----------------------------------------------------------
+    this.on(DOMAIN_EVENTS.SELLER_APPLIED, async (p: SellerAppliedPayload) => {
+      this.logger.log(`seller.applied ${p.sellerId} (${p.businessName})`);
+    });
+    this.on(DOMAIN_EVENTS.SELLER_APPROVED, async (p: SellerApprovedPayload) => {
       await this.mailer.send({
-        to: order.customer.email,
+        to: p.email,
+        template: 'SELLER_APPROVED',
+        data: { businessName: p.businessName, portalUrl: this.sellerUrl },
+      });
+    });
+    this.on(DOMAIN_EVENTS.SELLER_REJECTED, async (p: SellerRejectedPayload) => {
+      this.logger.log(`seller.rejected ${p.sellerId} (${p.businessName}): ${p.reason}`);
+    });
+
+    // ----- orders ------------------------------------------------------------
+    this.on(DOMAIN_EVENTS.ORDER_CONFIRMED, async (p: OrderConfirmedPayload) => {
+      const ctx = await this.orderContext(p.orderId);
+      if (!ctx) return;
+      await this.mailer.send({
+        to: ctx.email,
         template: 'ORDER_CONFIRMED',
         data: {
-          orderId: order.id,
-          totalAmount: order.totalAmount.toFixed(2),
-          currency: order.currency,
+          orderId: ctx.orderId,
+          totalAmount: ctx.totalAmount,
+          currency: ctx.currency,
+          orderUrl: this.orderUrl(ctx.orderId),
         },
+      });
+    });
+    this.on(DOMAIN_EVENTS.ORDER_SHIPPED, async (p: OrderShippedPayload) => {
+      await this.sendOrderMail(p.orderId, 'ORDER_SHIPPED');
+    });
+    this.on(DOMAIN_EVENTS.ORDER_DELIVERED, async (p: OrderDeliveredPayload) => {
+      await this.sendOrderMail(p.orderId, 'ORDER_DELIVERED');
+    });
+
+    // ----- subscriptions (SDS §5.4, §5.5, §7.5) -------------------------------
+    this.on(DOMAIN_EVENTS.SUBSCRIPTION_RENEWED, async (p: SubscriptionRenewedPayload) => {
+      const email = await this.customerEmail(p.customerId);
+      if (!email) return;
+      await this.mailer.send({
+        to: email,
+        template: 'SUBSCRIPTION_RENEWED',
+        data: {
+          subscriptionId: p.subscriptionId,
+          orderId: p.orderId,
+          amount: p.amount,
+          currency: p.currency,
+          manageUrl: this.subscriptionsUrl(),
+        },
+      });
+    });
+    this.on(DOMAIN_EVENTS.SUBSCRIPTION_CANCELLED, async (p: SubscriptionCancelledPayload) => {
+      const email = await this.customerEmail(p.customerId);
+      if (!email) return;
+      const sub = await this.subscriptionContext(p.subscriptionId);
+      await this.mailer.send({
+        to: email,
+        template: 'SUBSCRIPTION_CANCELLED',
+        data: { subscriptionId: p.subscriptionId, productName: sub.productName },
       });
     });
 
-    this.on(DOMAIN_EVENTS.BATCH_EXPIRING_SOON, async (p: BatchExpiringSoonPayload) => {
-      const admins = await this.prisma.adminUser.findMany({
-        where: { active: true, role: AdminRole.ADMIN },
-        select: { email: true },
+    // ----- refunds -----------------------------------------------------------
+    this.on(DOMAIN_EVENTS.REFUND_APPROVED, async (p: RefundApprovedPayload) => {
+      const email = await this.customerEmail(p.customerId);
+      if (!email) return;
+      const order = await this.prisma.order.findUnique({
+        where: { id: p.orderId },
+        select: { currency: true },
       });
-      for (const admin of admins) {
-        await this.mailer.send({
-          to: admin.email,
-          template: 'BATCH_EXPIRING_SOON',
-          data: {
-            batchNumber: p.batchNumber,
-            productVariantId: p.productVariantId,
-            currentQuantity: p.currentQuantity,
-            daysUntilExpiry: p.daysUntilExpiry,
-          },
-        });
-      }
+      await this.mailer.send({
+        to: email,
+        template: 'REFUND_ISSUED',
+        data: { orderId: p.orderId, amount: p.amount, currency: order?.currency ?? 'LKR' },
+      });
     });
+    this.on(DOMAIN_EVENTS.REFUND_REJECTED, async (p: RefundRejectedPayload) => {
+      this.logger.log(`refund.rejected ${p.refundRequestId} order=${p.orderId}: ${p.reason}`);
+    });
+
+    // ----- batches (SDS §5.6) --------------------------------------------------
+    this.on(DOMAIN_EVENTS.BATCH_EXPIRING_SOON, async (p: BatchExpiringSoonPayload) => {
+      await this.sendToMany(await this.adminEmails(), 'BATCH_EXPIRING_SOON', {
+        batchNumber: p.batchNumber,
+        productVariantId: p.productVariantId,
+        currentQuantity: p.currentQuantity,
+        daysUntilExpiry: p.daysUntilExpiry,
+      });
+    });
+  }
+
+  // ===== emit helpers =======================================================
+
+  emitSellerApplied(p: SellerAppliedPayload): void {
+    this.emitter.emit(DOMAIN_EVENTS.SELLER_APPLIED, p);
+  }
+  emitSellerApproved(p: SellerApprovedPayload): void {
+    this.emitter.emit(DOMAIN_EVENTS.SELLER_APPROVED, p);
+  }
+  emitSellerRejected(p: SellerRejectedPayload): void {
+    this.emitter.emit(DOMAIN_EVENTS.SELLER_REJECTED, p);
+  }
+  emitOrderConfirmed(p: OrderConfirmedPayload): void {
+    this.emitter.emit(DOMAIN_EVENTS.ORDER_CONFIRMED, p);
+  }
+  emitOrderShipped(p: OrderShippedPayload): void {
+    this.emitter.emit(DOMAIN_EVENTS.ORDER_SHIPPED, p);
+  }
+  emitOrderDelivered(p: OrderDeliveredPayload): void {
+    this.emitter.emit(DOMAIN_EVENTS.ORDER_DELIVERED, p);
+  }
+  emitSubscriptionRenewed(p: SubscriptionRenewedPayload): void {
+    this.emitter.emit(DOMAIN_EVENTS.SUBSCRIPTION_RENEWED, p);
+  }
+  emitSubscriptionCancelled(p: SubscriptionCancelledPayload): void {
+    this.emitter.emit(DOMAIN_EVENTS.SUBSCRIPTION_CANCELLED, p);
+  }
+  emitRefundApproved(p: RefundApprovedPayload): void {
+    this.emitter.emit(DOMAIN_EVENTS.REFUND_APPROVED, p);
+  }
+  emitRefundRejected(p: RefundRejectedPayload): void {
+    this.emitter.emit(DOMAIN_EVENTS.REFUND_REJECTED, p);
+  }
+  emitBatchExpiringSoon(p: BatchExpiringSoonPayload): void {
+    this.emitter.emit(DOMAIN_EVENTS.BATCH_EXPIRING_SOON, p);
+  }
+  emitBatchExpired(p: BatchExpiredPayload): void {
+    this.emitter.emit(DOMAIN_EVENTS.BATCH_EXPIRED, p);
   }
 
   // ===== helpers ============================================================
@@ -103,4 +282,100 @@ export class NotificationsService implements OnModuleInit {
       }
     });
   }
+
+  private async sendToMany(
+    recipients: string[],
+    template: TemplateKey,
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    const unique = [...new Set(recipients.map((r) => r.toLowerCase()))];
+    if (unique.length === 0) {
+      this.logger.warn(`${template}: no recipients`);
+      return;
+    }
+    for (const to of unique) {
+      await this.mailer.send({ to, template, data });
+    }
+  }
+
+  private async sendOrderMail(orderId: string, template: TemplateKey): Promise<void> {
+    const ctx = await this.orderContext(orderId);
+    if (!ctx) return;
+    await this.mailer.send({
+      to: ctx.email,
+      template,
+      data: { orderId: ctx.orderId, orderUrl: this.orderUrl(ctx.orderId) },
+    });
+  }
+
+  private orderUrl(orderId: string): string {
+    return `${this.storefrontUrl}/account/orders/${orderId}`;
+  }
+
+  private subscriptionsUrl(): string {
+    return `${this.storefrontUrl}/account/subscriptions`;
+  }
+
+  /** Active accounts with role ADMIN (operations alerts). */
+  private async adminEmails(): Promise<string[]> {
+    const admins = await this.prisma.adminUser.findMany({
+      where: { active: true, role: AdminRole.ADMIN },
+      select: { email: true },
+    });
+    return admins.map((a) => a.email);
+  }
+
+  private async orderContext(orderId: string): Promise<OrderContext | null> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        totalAmount: true,
+        currency: true,
+        customer: { select: { email: true } },
+      },
+    });
+    if (!order) {
+      this.logger.error(`Cannot send order email: order ${orderId} not found`);
+      return null;
+    }
+    return {
+      orderId: order.id,
+      email: order.customer.email,
+      totalAmount: new Prisma.Decimal(order.totalAmount).toFixed(2),
+      currency: order.currency,
+    };
+  }
+
+  private async subscriptionContext(subscriptionId: string): Promise<SubscriptionContext> {
+    const sub = await this.prisma.subscription.findUnique({
+      where: { id: subscriptionId },
+      select: {
+        nextBillingDate: true,
+        variant: { select: { name: true, product: { select: { name: true } } } },
+      },
+    });
+    if (!sub) return { productName: null, nextBillingDate: null };
+    return {
+      productName: `${sub.variant.product.name} (${sub.variant.name})`,
+      nextBillingDate: isoDate(sub.nextBillingDate),
+    };
+  }
+
+  private async customerEmail(customerId: string): Promise<string | null> {
+    const c = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { email: true },
+    });
+    return c?.email ?? null;
+  }
+}
+
+function trimSlash(url: string): string {
+  return url.replace(/\/+$/, '');
+}
+
+function isoDate(value: Date | string): string {
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(d.getTime()) ? String(value) : d.toISOString().slice(0, 10);
 }

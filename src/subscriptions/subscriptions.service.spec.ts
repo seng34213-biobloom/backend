@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import { PaymentGateway, SubscriptionStatus } from '@prisma/client';
 import { SubscriptionsService, addDaysUtc, startOfTodayUtc } from './subscriptions.service';
 import { TokenCipherService } from './token-cipher.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 function makePrisma() {
@@ -28,11 +29,17 @@ describe('SubscriptionsService', () => {
   let svc: SubscriptionsService;
   let prisma: jest.Mocked<PrismaService>;
   let cipher: jest.Mocked<Pick<TokenCipherService, 'encrypt' | 'decrypt'>>;
+  let notifications: jest.Mocked<Pick<NotificationsService, 'emitSubscriptionCancelled'>>;
 
   beforeEach(() => {
     prisma = makePrisma();
     cipher = makeCipher();
-    svc = new SubscriptionsService(prisma, cipher as unknown as TokenCipherService);
+    notifications = { emitSubscriptionCancelled: jest.fn() };
+    svc = new SubscriptionsService(
+      prisma,
+      cipher as unknown as TokenCipherService,
+      notifications as unknown as NotificationsService,
+    );
   });
 
   describe('create', () => {
@@ -215,6 +222,10 @@ describe('SubscriptionsService', () => {
       const data = (prisma.subscription.update as jest.Mock).mock.calls[0][0].data;
       expect(data.status).toBe(SubscriptionStatus.CANCELLED);
       expect(data.cancelledAt).toBeInstanceOf(Date);
+      expect(notifications.emitSubscriptionCancelled).toHaveBeenCalledWith({
+        subscriptionId: 's-1',
+        customerId: 'cust-1',
+      });
     });
 
     it('skipNext: ACTIVE only, advances by frequencyDays once', async () => {
@@ -254,6 +265,7 @@ describe('SubscriptionsService', () => {
       const out = await svc.cancel('cust-1', 's-1');
       expect(out.status).toBe(SubscriptionStatus.CANCELLED);
       expect(prisma.subscription.update).not.toHaveBeenCalled();
+      expect(notifications.emitSubscriptionCancelled).not.toHaveBeenCalled();
     });
 
     it('returns 404 for an unknown subscription', async () => {
