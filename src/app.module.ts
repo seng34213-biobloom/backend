@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { AddressesModule } from './addresses/addresses.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
@@ -13,9 +14,11 @@ import { CartModule } from './cart/cart.module';
 import { CsrfMiddleware } from './common/middleware/csrf.middleware';
 import { HealthModule } from './health/health.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { OrdersModule } from './orders/orders.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
+import { ShippingModule } from './shipping/shipping.module';
 import { RedisModule } from './redis/redis.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 
@@ -29,18 +32,23 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
       { name: 'default', ttl: 60_000, limit: 100 },
       { name: 'auth', ttl: 900_000, limit: 20 },
     ]),
+    EventEmitterModule.forRoot(),
     // SDS §4.2 — feature modules emit domain events; NotificationsService sends the emails.
     EventEmitterModule.forRoot(),
     // SDS §5.6 — daily scheduled jobs such as the batch expiry sweep.
     ScheduleModule.forRoot(),
     PrismaModule,
     RedisModule,
+    AddressesModule,
     AuditModule,
     NotificationsModule,
     InventoryModule,
     ProductsModule,
     BatchesModule,
     CartModule,
+    ShippingModule,
+    OrdersModule,
+    NotificationsModule,
     SubscriptionsModule,
     HealthModule,
     AuthModule,
