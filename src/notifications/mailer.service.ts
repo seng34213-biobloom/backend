@@ -1,8 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createTransport, type Transporter } from 'nodemailer';
-import { renderOrderConfirmed } from './templates.config';
-
 import { TEMPLATES, type RenderedMessage, type TemplateKey } from './templates.config';
 
 export interface SendArgs {
@@ -38,8 +36,6 @@ export class MailerService {
     this.transporter = createTransport({
       host,
       port,
-      secure: port === 465,
-      ...(user && pass ? { auth: { user, pass } } : {}),
       // MailHog speaks plain SMTP on 1025 (no TLS); SendGrid requires TLS on 465.
       secure: port === 465,
       ...(user && pass ? { auth: { user, pass } } : {}),
@@ -48,25 +44,6 @@ export class MailerService {
     });
   }
 
-  async sendOrderConfirmed(input: {
-    to: string;
-    orderId: string;
-    totalAmount: string;
-    currency: string;
-  }): Promise<void> {
-    const message = renderOrderConfirmed(input);
-    try {
-      await this.transporter.sendMail({
-        from: this.from,
-        to: input.to,
-        subject: message.subject,
-        html: message.html,
-        headers: { 'X-Biobloom-Template': 'd-order-confirmed' },
-      });
-      this.logger.log(`Order confirmation email sent for order=${input.orderId}`);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : 'Unknown SMTP error';
-      this.logger.error(`Order confirmation email failed for order=${input.orderId}: ${detail}`);
   async send(args: SendArgs): Promise<{ accepted: boolean; templateId: string }> {
     const tpl = TEMPLATES[args.template];
     if (!tpl) {

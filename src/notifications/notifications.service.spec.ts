@@ -1,40 +1,3 @@
-import { PrismaService } from '../prisma/prisma.service';
-import { MailerService } from './mailer.service';
-import { NotificationsService } from './notifications.service';
-
-describe('NotificationsService', () => {
-  it('sends an order confirmation email to the customer after payment succeeds', async () => {
-    const prisma = {
-      order: {
-        findUnique: jest.fn().mockResolvedValue({
-          id: 'order-1',
-          totalAmount: { toFixed: () => '1500.00' },
-          currency: 'LKR',
-          customer: { email: 'customer@example.com' },
-        }),
-      },
-    } as unknown as PrismaService;
-    const mailer = { sendOrderConfirmed: jest.fn().mockResolvedValue(undefined) };
-    const service = new NotificationsService(prisma, mailer as unknown as MailerService);
-
-    await service.sendOrderConfirmation({ orderId: 'order-1' });
-
-    expect(prisma.order.findUnique).toHaveBeenCalledWith({
-      where: { id: 'order-1' },
-      select: {
-        id: true,
-        totalAmount: true,
-        currency: true,
-        customer: { select: { email: true } },
-      },
-    });
-    expect(mailer.sendOrderConfirmed).toHaveBeenCalledWith({
-      to: 'customer@example.com',
-      orderId: 'order-1',
-      totalAmount: '1500.00',
-      currency: 'LKR',
-    });
-  });
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailerService } from './mailer.service';
@@ -60,6 +23,14 @@ describe('NotificationsService', () => {
       send: jest.fn().mockResolvedValue({ accepted: true, templateId: 'd-batch-expiring-soon' }),
     } as unknown as jest.Mocked<MailerService>;
     prisma = {
+      order: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'order-1',
+          totalAmount: { toFixed: () => '1500.00' },
+          currency: 'LKR',
+          customer: { email: 'customer@example.com' },
+        }),
+      },
       adminUser: {
         findMany: jest
           .fn()
@@ -67,6 +38,33 @@ describe('NotificationsService', () => {
       },
     } as unknown as jest.Mocked<PrismaService>;
     new NotificationsService(emitter, mailer, prisma).onModuleInit();
+  });
+
+  it('sends an order confirmation email to the customer after payment succeeds', async () => {
+    await emitter.emitAsync(DOMAIN_EVENTS.ORDER_CONFIRMED, { orderId: 'order-1' });
+
+    expect(prisma.order.findUnique).toHaveBeenCalledWith({
+      where: { id: 'order-1' },
+      select: {
+        id: true,
+        totalAmount: true,
+        currency: true,
+        customer: { select: { email: true } },
+      },
+    });
+    expect(mailer.send).toHaveBeenCalledWith({
+      to: 'customer@example.com',
+      template: 'ORDER_CONFIRMED',
+      data: { orderId: 'order-1', totalAmount: '1500.00', currency: 'LKR' },
+    });
+  });
+
+  it('skips the confirmation email when the order no longer exists', async () => {
+    (prisma.order.findUnique as jest.Mock).mockResolvedValueOnce(null);
+
+    await emitter.emitAsync(DOMAIN_EVENTS.ORDER_CONFIRMED, { orderId: 'missing' });
+
+    expect(mailer.send).not.toHaveBeenCalled();
   });
 
   it('emails every active admin when a batch is expiring soon', async () => {

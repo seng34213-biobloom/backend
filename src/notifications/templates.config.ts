@@ -5,36 +5,16 @@
  * inline HTML body via MailerService → MailHog.
  */
 
-export type TemplateKey = 'BATCH_EXPIRING_SOON';
+export type TemplateKey = 'ORDER_CONFIRMED' | 'BATCH_EXPIRING_SOON';
 
 export interface RenderedMessage {
   subject: string;
   html: string;
 }
 
-export function renderOrderConfirmed(data: {
-  orderId: string;
-  totalAmount: string;
-  currency: string;
-}): RenderedMessage {
-  const orderId = escapeHtml(data.orderId);
-  const currency = escapeHtml(data.currency);
-  const amount = escapeHtml(data.totalAmount);
-  return {
-    subject: `Order ${data.orderId.slice(0, 8)} confirmed`,
-    html: `<!doctype html>
-<html><body style="font-family: system-ui, sans-serif; color: #2f4a2a; max-width: 600px; margin: 24px auto;">
-  <h1 style="font-family: Georgia, serif; color: #557f41;">Thanks for your order!</h1>
-  <p>Order <strong>${orderId}</strong> is confirmed. We're packing your order now.</p>
-  <p>Total: <strong>${currency} ${amount}</strong></p>
-  <hr style="margin-top: 32px; border: 0; border-top: 1px solid #e5ddc8;" />
-  <p style="font-size: 12px; color: #94785a;">Bio Bloom · biobloom.lk</p>
-</body></html>`,
-  };
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (character) => {
+/** Escapes untrusted values before they are placed in email HTML. */
+export function escapeHtml(value: unknown): string {
+  return String(value).replace(/[&<>"']/g, (character) => {
     const entities: Record<string, string> = {
       '&': '&amp;',
       '<': '&lt;',
@@ -45,6 +25,7 @@ function escapeHtml(value: string): string {
     return entities[character];
   });
 }
+
 const wrap = (heading: string, body: string): string => `
 <!doctype html>
 <html><body style="font-family: system-ui, sans-serif; color: #2f4a2a; max-width: 600px; margin: 24px auto;">
@@ -58,6 +39,17 @@ export const TEMPLATES: Record<
   TemplateKey,
   { id: string; render: (data: Record<string, unknown>) => RenderedMessage }
 > = {
+  ORDER_CONFIRMED: {
+    id: 'd-order-confirmed',
+    render: (d) => ({
+      subject: `Order ${String(d.orderId).slice(0, 8)} confirmed`,
+      html: wrap(
+        'Thanks for your order!',
+        `<p>Order <strong>${escapeHtml(d.orderId)}</strong> is confirmed. We're packing your order now.</p>
+         <p>Total: <strong>${escapeHtml(d.currency)} ${escapeHtml(d.totalAmount)}</strong></p>`,
+      ),
+    }),
+  },
   BATCH_EXPIRING_SOON: {
     id: 'd-batch-expiring-soon',
     render: (d) => ({
