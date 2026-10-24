@@ -145,6 +145,16 @@ All routes are under `/api`. Invalid input returns `422 Unprocessable Entity`.
 
 Admins and sellers add stock with `POST /admin/products/:productId/variants/:variantId/batches` (`batchNumber`, `manufacturedDate`, `expiryDate`, `initialQuantity`). The manufactured date cannot be in the future and the expiry date must be tomorrow or later. Sellers can only manage batches of their own products; products without a seller are managed by admins. Every new batch writes a `batch.create` row to `audit_log`.
 
+## Deployment
+
+Staging runs on Render in Singapore: the `biobloom-api` web service, Render Postgres 15 and Render Key Value.
+
+- API: https://biobloom-api.onrender.com/api
+- Every push to `develop` runs CI. When it passes, the `Deploy to Render staging` job deploys that commit through the `RENDER_DEPLOY_HOOK_URL` secret of the `staging` environment.
+- Migrations run with `prisma migrate deploy` when the service starts. Render only switches traffic to the new version once `/api/health` responds, so a failed deploy leaves the previous one live.
+- Environment variables are set on the Render service, not in the repo. The names match `.env.example`.
+- Staging uses free instances, which sleep after 15 minutes without traffic. The first request after that takes up to a minute, and the 06:00 UTC expiry sweep only runs while the instance is awake.
+
 ## Branching
 
 Work happens on short-lived branches cut from `develop`, and changes reach `develop` through a pull request with one approval. `main` is updated from `develop` for releases.

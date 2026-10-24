@@ -79,3 +79,33 @@ jobs:
 
       - name: Integration tests
         run: npm run test:e2e
+
+  deploy-staging:
+    name: Deploy to Render staging
+    needs: build-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://biobloom-api.onrender.com/api/health
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+
+    steps:
+      # Deploys the exact commit that passed CI. Render keeps the previous
+      # version live if the new one fails its /api/health check.
+      - name: Trigger Render deploy
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: curl -fsS -X POST "${RENDER_DEPLOY_HOOK_URL}&ref=${GITHUB_SHA}" > /dev/null
+
+      - name: Wait for the API to respond
+        run: |
+          sleep 90
+          for _ in $(seq 1 30); do
+            if curl -fsS https://biobloom-api.onrender.com/api/health; then exit 0; fi
+            sleep 20
+          done
+          echo "API did not respond after the deploy" >&2
+          exit 1
