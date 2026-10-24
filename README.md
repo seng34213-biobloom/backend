@@ -131,7 +131,7 @@ All routes are under `/api`. Invalid input returns `422 Unprocessable Entity`.
 
 | Method | Route                                                          | Description                                                                                                                             |
 | ------ | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/health`                                                      | Liveness check                                                                                                                          |
+| GET    | `/health`                                                      | Liveness check. `commit` is the deployed commit on Render, `null` elsewhere                                                             |
 | GET    | `/products`                                                    | Catalogue. Query: `category`, `search`, `page` (default 1), `pageSize` (default 24, max 60). Only products with sellable stock          |
 | GET    | `/products/:slug`                                              | Product detail with `stockByVariant` and `earliestExpiryByVariant`                                                                      |
 | GET    | `/subscriptions`                                               | Signed-in customer's subscriptions                                                                                                      |
@@ -144,6 +144,17 @@ All routes are under `/api`. Invalid input returns `422 Unprocessable Entity`.
 | GET    | `/admin/analytics/top-selling`                                 | Best-selling products this month by revenue, `limit` 1–50 (default 5). Admin only                                                       |
 
 Admins and sellers add stock with `POST /admin/products/:productId/variants/:variantId/batches` (`batchNumber`, `manufacturedDate`, `expiryDate`, `initialQuantity`). The manufactured date cannot be in the future and the expiry date must be tomorrow or later. Sellers can only manage batches of their own products; products without a seller are managed by admins. Every new batch writes a `batch.create` row to `audit_log`.
+
+## Deployment
+
+Staging runs on Render in Singapore: the `biobloom-api` web service, Render Postgres 15 and Render Key Value.
+
+- API: https://biobloom-api.onrender.com/api
+- Every push to `develop` runs CI. When it passes, the `Deploy to Render staging` job deploys that commit through the `RENDER_DEPLOY_HOOK_URL` secret of the `staging` environment, then waits until `/api/health` reports that commit. The job fails if it does not within 15 minutes.
+- Auto-deploy is off on the Render service, so a commit that fails CI is never deployed.
+- Migrations run with `prisma migrate deploy` when the service starts. Render only switches traffic to the new version once `/api/health` responds, so a failed deploy leaves the previous one live.
+- Environment variables are set on the Render service, not in the repo. The names match `.env.example`.
+- Staging uses free instances, which sleep after 15 minutes without traffic. The first request after that takes up to a minute, and the 06:00 UTC expiry sweep only runs while the instance is awake.
 
 ## Branching
 
