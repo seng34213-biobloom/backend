@@ -27,15 +27,28 @@ import { RefundsModule } from './refunds/refunds.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { SupportModule } from './support/support.module';
 
+// Metadata key that @Throttle({ auth }) writes on a route.
+const AUTH_THROTTLE_KEY = 'THROTTLER:LIMITauth';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ['.env.local', '.env'],
     }),
+    // SDS §7.4 — "default" applies to every route, "auth" only to routes marked
+    // @Throttle({ auth }). @nestjs/throttler 6 applies every named throttler to
+    // every route unless it is skipped.
     ThrottlerModule.forRoot([
       { name: 'default', ttl: 60_000, limit: 100 },
-      { name: 'auth', ttl: 900_000, limit: 20 },
+      {
+        name: 'auth',
+        ttl: 900_000,
+        limit: 20,
+        skipIf: (context) =>
+          !Reflect.hasMetadata(AUTH_THROTTLE_KEY, context.getHandler()) &&
+          !Reflect.hasMetadata(AUTH_THROTTLE_KEY, context.getClass()),
+      },
     ]),
     // SDS §4.2 — feature modules emit domain events; NotificationsService sends the emails.
     EventEmitterModule.forRoot(),

@@ -38,4 +38,11 @@ describe('Authentication rate limit (e2e)', () => {
       .send({})
       .expect(429);
   });
+
+  it('does not apply the auth limit to other routes', async () => {
+    for (let attempt = 1; attempt <= 25; attempt += 1) {
+      const res = await request(app.getHttpServer()).get('/api/health').expect(200);
+      expect(res.headers['x-ratelimit-limit-auth']).toBeUndefined();
+    }
+  });
 });
