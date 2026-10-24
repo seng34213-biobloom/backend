@@ -141,6 +141,40 @@ export class InventoryService {
     return taken;
   }
 
+  async restockOrderItems(
+    orderId: string,
+    tx: PrismaTx,
+  ): Promise<Array<{ batchId: string; quantity: number; restocked: boolean }>> {
+    const items = await tx.orderItem.findMany({
+      where: { orderId },
+      select: { batchId: true, quantity: true },
+    });
+    const today = startOfTodayUtc();
+    const results: Array<{ batchId: string; quantity: number; restocked: boolean }> = [];
+
+    for (const item of items) {
+      const batch = await tx.productBatch.findUnique({ where: { id: item.batchId } });
+      if (!batch || batch.expiryDate < today) {
+        results.push({ batchId: item.batchId, quantity: item.quantity, restocked: false });
+        continue;
+      }
+
+      const restored = batch.currentQuantity + item.quantity;
+      await tx.productBatch.update({
+        where: { id: batch.id },
+        data: {
+          currentQuantity: restored,
+          ...(batch.status === BatchStatus.DEPLETED && restored > 0
+            ? { status: BatchStatus.ACTIVE }
+            : {}),
+        },
+      });
+      results.push({ batchId: batch.id, quantity: item.quantity, restocked: true });
+    }
+
+    return results;
+  }
+
   /**
    * Primitive single-batch decrement. Used by admin correction tools.
    * Not the checkout path.

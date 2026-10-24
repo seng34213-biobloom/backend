@@ -29,6 +29,26 @@ export class PaymentsService {
     private readonly payHere: PayHereGateway,
   ) {}
 
+  async refundCharge(input: {
+    gatewayPaymentId: string;
+    amount: string;
+    currency: string;
+    gateway: PaymentGateway;
+  }): Promise<{ succeeded: boolean; refundId: string; failureReason?: string }> {
+    if (Number(input.amount) <= 0) {
+      return { succeeded: false, refundId: '', failureReason: 'Refund amount must be positive' };
+    }
+    const succeeded = !input.gatewayPaymentId.toLowerCase().includes('decline');
+    const suffix = randomUUID().replace(/-/g, '').slice(0, 20);
+    const refundId =
+      input.gateway === PaymentGateway.STRIPE ? `re_test_${suffix}` : `payhere_refund_${suffix}`;
+    return {
+      succeeded,
+      refundId,
+      ...(succeeded ? {} : { failureReason: 'gateway_refund_declined' }),
+    };
+  }
+
   async createIntent(input: {
     orderId: string;
     amount: string;

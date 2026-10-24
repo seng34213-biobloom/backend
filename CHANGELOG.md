@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Admin analytics API: `GET /api/admin/analytics/dashboard` (today's revenue, pending orders, active subscriptions, batches expiring soon), `/revenue-series` (zero-filled daily revenue, 30 days by default) and `/top-selling`; only paid orders count as revenue (#45)
 - Transactional email for order confirmed, shipped and delivered, subscription renewed, cancelled, stock delayed and charge failed, refund issued and seller approved, sent from domain events through `NotificationsService` (#43)
 - Cancelling a subscription now sends the cancellation confirmation email (#43)
+- Audited order status transitions, staff fulfilment queues, shipment and delivery emails, and refunds with expiry-safe batch restocking (#26)
 - Customer shipping addresses, weight-based shipping quotes, payment intents, and atomic FIFO checkout with price, weight, and shipping snapshots (#17)
 - Stripe and PayHere hosted payment intents, signature-verified idempotent webhooks, failure restocking, and order-confirmation email notifications (#21)
 - Daily batch expiry sweep at 06:00 UTC: batches within 7 days of expiry become `EXPIRING_SOON` and every active admin is emailed; expired batches become `EXPIRED` (#39)

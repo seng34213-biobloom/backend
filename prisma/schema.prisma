@@ -69,6 +69,13 @@ enum PaymentStatus {
   REFUNDED
 }
 
+enum RefundStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  PROCESSED
+}
+
 model Customer {
   id           String   @id @default(uuid()) @db.Uuid
   email        String   @unique
@@ -78,10 +85,11 @@ model Customer {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  addresses     Address[]
-  subscriptions Subscription[]
-  cartItems     CartItem[]
-  orders        Order[]
+  addresses      Address[]
+  subscriptions  Subscription[]
+  cartItems      CartItem[]
+  orders         Order[]
+  refundRequests RefundRequest[]
 
   @@index([email])
   @@map("customer")
@@ -313,10 +321,11 @@ model Order {
   createdAt         DateTime      @default(now()) @map("created_at")
   updatedAt         DateTime      @updatedAt @map("updated_at")
 
-  customer        Customer    @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  shippingAddress Address     @relation(fields: [shippingAddressId], references: [id], onDelete: Restrict)
+  customer        Customer        @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  shippingAddress Address         @relation(fields: [shippingAddressId], references: [id], onDelete: Restrict)
   items           OrderItem[]
   payments        Payment[]
+  refundRequests  RefundRequest[]
 
   @@index([customerId, placedAt])
   @@index([status])
@@ -370,4 +379,24 @@ model Payment {
   @@index([orderId])
   @@index([subscriptionId])
   @@map("payment")
+}
+
+model RefundRequest {
+  id                 String       @id @default(uuid()) @db.Uuid
+  orderId            String       @map("order_id") @db.Uuid
+  customerId         String       @map("customer_id") @db.Uuid
+  amount             Decimal      @db.Decimal(12, 2)
+  reason             String
+  status             RefundStatus @default(REQUESTED)
+  processedAt        DateTime?    @map("processed_at")
+  processedByAdminId String?      @map("processed_by_admin_id") @db.Uuid
+  createdAt          DateTime     @default(now()) @map("created_at")
+  updatedAt          DateTime     @updatedAt @map("updated_at")
+
+  order    Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  @@index([status])
+  @@index([orderId])
+  @@map("refund_request")
 }

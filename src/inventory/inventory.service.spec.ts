@@ -19,6 +19,7 @@ describe('InventoryService', () => {
         update: jest.fn().mockResolvedValue({}),
         findUnique: jest.fn(),
       },
+      orderItem: { findMany: jest.fn() },
       $queryRaw: jest.fn(),
     } as unknown as jest.Mocked<PrismaService>;
     svc = new InventoryService(prisma);
@@ -183,6 +184,43 @@ describe('InventoryService', () => {
       (prisma.productBatch.findUnique as jest.Mock).mockResolvedValue(null);
       await expect(svc.decrementBatch('missing', 1, prisma)).rejects.toThrow(/not found/);
       expect(prisma.productBatch.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('restockOrderItems', () => {
+    it('restocks unexpired batches and skips expired or missing batches', async () => {
+      const today = new Date();
+      today.setUTCHours(0, 0, 0, 0);
+      (prisma.orderItem.findMany as jest.Mock).mockResolvedValue([
+        { batchId: 'fresh', quantity: 2 },
+        { batchId: 'expired', quantity: 1 },
+        { batchId: 'missing', quantity: 1 },
+      ]);
+      (prisma.productBatch.findUnique as jest.Mock)
+        .mockResolvedValueOnce({
+          id: 'fresh',
+          currentQuantity: 3,
+          expiryDate: new Date(today.getTime() + 86_400_000),
+          status: 'DEPLETED',
+        })
+        .mockResolvedValueOnce({
+          id: 'expired',
+          currentQuantity: 3,
+          expiryDate: new Date(today.getTime() - 86_400_000),
+          status: 'EXPIRED',
+        })
+        .mockResolvedValueOnce(null);
+
+      await expect(svc.restockOrderItems('order-1', prisma)).resolves.toEqual([
+        { batchId: 'fresh', quantity: 2, restocked: true },
+        { batchId: 'expired', quantity: 1, restocked: false },
+        { batchId: 'missing', quantity: 1, restocked: false },
+      ]);
+      expect(prisma.productBatch.update).toHaveBeenCalledTimes(1);
+      expect(prisma.productBatch.update).toHaveBeenCalledWith({
+        where: { id: 'fresh' },
+        data: { currentQuantity: 5, status: 'ACTIVE' },
+      });
     });
   });
 });
