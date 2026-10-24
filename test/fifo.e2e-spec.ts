@@ -6,6 +6,7 @@ import { OutOfStockError } from '../src/inventory/inventory.errors';
 import { InventoryService } from '../src/inventory/inventory.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ProductsService } from '../src/products/products.service';
+import { fixtureNamespace } from './helpers/fixtures';
 
 /**
  * Real Postgres + Prisma.
@@ -22,7 +23,7 @@ describe('FIFO inventory (e2e)', () => {
   let prisma: PrismaService;
   let inventory: InventoryService;
 
-  const stamp = Date.now();
+  const stamp = fixtureNamespace('fifo');
   let variantId: string;
   const batchIds: { early: string; mid: string; late: string; expired: string } = {
     early: '',
