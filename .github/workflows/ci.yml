@@ -79,3 +79,39 @@ jobs:
 
       - name: Integration tests
         run: npm run test:e2e
+
+  deploy-staging:
+    name: Deploy to Render staging
+    needs: build-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment:
+      name: staging
+      url: https://biobloom-api.onrender.com/api/health
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+
+    steps:
+      # Deploys the exact commit that passed CI. Render keeps the previous
+      # version live if the new one fails its /api/health check.
+      - name: Trigger Render deploy
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: curl -fsS --max-time 30 -X POST "${RENDER_DEPLOY_HOOK_URL}&ref=${GITHUB_SHA}" > /dev/null
+
+      # The previous version keeps answering /api/health while Render builds,
+      # so wait until the health check reports this commit.
+      - name: Wait for staging to serve this commit
+        run: |
+          for _ in $(seq 1 45); do
+            commit=$(curl -fsS --max-time 60 https://biobloom-api.onrender.com/api/health | jq -r '.commit // empty' || true)
+            if [ "$commit" = "$GITHUB_SHA" ]; then
+              echo "Staging is serving $GITHUB_SHA"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "Staging did not serve $GITHUB_SHA within 15 minutes of the deploy" >&2
+          exit 1
