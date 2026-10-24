@@ -5,6 +5,14 @@ import { TokenCipherService } from './token-cipher.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 
+// Variant and product as returned by the subscription select
+const VARIANT = {
+  id: 'v-1',
+  name: 'Wild Honey 250g',
+  size: '250 g',
+  product: { id: 'p-1', name: 'Wild Honey', slug: 'wild-honey' },
+};
+
 function makePrisma() {
   return {
     address: { findUnique: jest.fn() },
@@ -67,6 +75,7 @@ describe('SubscriptionsService', () => {
           cancelledAt: null,
           createdAt: new Date(),
           updatedAt: new Date(),
+          variant: VARIANT,
         }),
       );
     }
@@ -164,6 +173,7 @@ describe('SubscriptionsService', () => {
         cancelledAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
+        variant: VARIANT,
       });
       (prisma.subscription.update as jest.Mock).mockImplementation(({ data }) =>
         Promise.resolve({
@@ -180,6 +190,7 @@ describe('SubscriptionsService', () => {
           cancelledAt: data.cancelledAt ?? null,
           createdAt: new Date(),
           updatedAt: new Date(),
+          variant: VARIANT,
         }),
       );
     }
@@ -291,8 +302,8 @@ describe('SubscriptionsService', () => {
   describe('list', () => {
     it("returns only the customer's subscriptions, newest first, without the token", async () => {
       (prisma.subscription.findMany as jest.Mock).mockResolvedValue([
-        { id: 's-2', customerId: 'cust-1', discountRate: '0.1' },
-        { id: 's-1', customerId: 'cust-1', discountRate: '0.1' },
+        { id: 's-2', customerId: 'cust-1', discountRate: '0.1', variant: VARIANT },
+        { id: 's-1', customerId: 'cust-1', discountRate: '0.1', variant: VARIANT },
       ]);
       const out = await svc.list('cust-1');
       const args = (prisma.subscription.findMany as jest.Mock).mock.calls[0][0];
@@ -300,6 +311,26 @@ describe('SubscriptionsService', () => {
       expect(args.orderBy).toEqual({ createdAt: 'desc' });
       expect(args.select.paymentTokenEncrypted).toBeUndefined();
       expect(out.map((s) => s.discountRate)).toEqual(['0.1000', '0.1000']);
+    });
+
+    it('includes the product and variant names for the dashboard cards', async () => {
+      (prisma.subscription.findMany as jest.Mock).mockResolvedValue([
+        { id: 's-1', customerId: 'cust-1', discountRate: '0.1', variant: VARIANT },
+      ]);
+
+      const [sub] = await svc.list('cust-1');
+
+      const select = (prisma.subscription.findMany as jest.Mock).mock.calls[0][0].select;
+      expect(select.variant).toEqual({
+        select: {
+          id: true,
+          name: true,
+          size: true,
+          product: { select: { id: true, name: true, slug: true } },
+        },
+      });
+      expect(sub.product).toEqual({ id: 'p-1', name: 'Wild Honey', slug: 'wild-honey' });
+      expect(sub.variant).toEqual({ id: 'v-1', name: 'Wild Honey 250g', size: '250 g' });
     });
   });
 });
