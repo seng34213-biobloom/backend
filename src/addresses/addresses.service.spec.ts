@@ -66,6 +66,31 @@ describe('AddressesService', () => {
     expect(result.id).toBe('address-1');
   });
 
+  it('leaves an address non-default when requested for a customer with existing addresses', async () => {
+    (prisma.address.count as jest.Mock).mockResolvedValue(1);
+    (prisma.address.create as jest.Mock).mockResolvedValue({
+      ...addressRow,
+      isDefault: false,
+    });
+
+    await service.create('customer-1', {
+      line1: '8 Lake Road',
+      city: 'Colombo',
+      district: 'Colombo',
+      postalCode: '00200',
+      isDefault: false,
+    });
+
+    expect(prisma.address.updateMany).not.toHaveBeenCalled();
+    expect(prisma.address.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        customerId: 'customer-1',
+        country: 'LK',
+        isDefault: false,
+      }),
+    });
+  });
+
   it('clears the previous default before setting another address as default', async () => {
     (prisma.address.count as jest.Mock).mockResolvedValue(2);
     (prisma.address.create as jest.Mock).mockResolvedValue({
@@ -85,6 +110,30 @@ describe('AddressesService', () => {
     expect(prisma.address.updateMany).toHaveBeenCalledWith({
       where: { customerId: 'customer-1', isDefault: true },
       data: { isDefault: false },
+    });
+  });
+
+  it('sets an owned address as the customer default', async () => {
+    (prisma.address.update as jest.Mock).mockResolvedValue({
+      ...addressRow,
+      isDefault: true,
+    });
+
+    await expect(service.setDefault('customer-1', 'address-1')).resolves.toMatchObject({
+      id: 'address-1',
+      isDefault: true,
+    });
+
+    expect(prisma.address.findFirst).toHaveBeenCalledWith({
+      where: { id: 'address-1', customerId: 'customer-1' },
+    });
+    expect(prisma.address.updateMany).toHaveBeenCalledWith({
+      where: { customerId: 'customer-1', isDefault: true },
+      data: { isDefault: false },
+    });
+    expect(prisma.address.update).toHaveBeenCalledWith({
+      where: { id: 'address-1' },
+      data: { isDefault: true },
     });
   });
 
