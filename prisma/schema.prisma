@@ -81,6 +81,13 @@ enum ReviewStatus {
   APPROVED
 }
 
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
 model Customer {
   id           String   @id @default(uuid()) @db.Uuid
   email        String   @unique
@@ -96,6 +103,7 @@ model Customer {
   orders         Order[]
   refundRequests RefundRequest[]
   reviews        ProductReview[]
+  supportTickets SupportTicket[]
 
   @@index([email])
   @@map("customer")
@@ -428,4 +436,22 @@ model ProductReview {
   @@index([productId, status, createdAt])
   @@index([orderId])
   @@map("product_review")
+}
+
+model SupportTicket {
+  id         String              @id @default(uuid()) @db.Uuid
+  customerId String              @map("customer_id") @db.Uuid
+  subject    String              @db.VarChar(160)
+  message    String
+  status     SupportTicketStatus @default(OPEN)
+  resolvedAt DateTime?           @map("resolved_at")
+  closedAt   DateTime?           @map("closed_at")
+  createdAt  DateTime            @default(now()) @map("created_at")
+  updatedAt  DateTime            @updatedAt @map("updated_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  @@index([customerId, createdAt])
+  @@index([status, createdAt])
+  @@map("support_ticket")
 }

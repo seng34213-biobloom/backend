@@ -25,6 +25,7 @@ import { ShippingModule } from './shipping/shipping.module';
 import { RedisModule } from './redis/redis.module';
 import { RefundsModule } from './refunds/refunds.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+import { SupportModule } from './support/support.module';
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     FulfilmentModule,
     RefundsModule,
     ReviewsModule,
+    SupportModule,
     SubscriptionsModule,
     HealthModule,
     AuthModule,
