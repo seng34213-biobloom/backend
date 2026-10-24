@@ -1,8 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createTransport, type Transporter } from 'nodemailer';
-import { renderOrderConfirmed } from './templates.config';
-
 import { TEMPLATES, type RenderedMessage, type TemplateKey } from './templates.config';
 
 export interface SendArgs {
@@ -20,8 +18,9 @@ export interface SendArgs {
  *       way the call site doesn't change — handlers just call
  *       `mailer.send({to, template, data})`.
  *
- * Failures are logged but never thrown — the SDS asks for async delivery
- * that cannot block the request thread.
+ * Failures (unknown template, render error, SMTP refusal) are logged but
+ * never thrown — the SDS asks for async delivery that cannot block the
+ * request thread.
  */
 @Injectable()
 export class MailerService {
@@ -38,8 +37,6 @@ export class MailerService {
     this.transporter = createTransport({
       host,
       port,
-      secure: port === 465,
-      ...(user && pass ? { auth: { user, pass } } : {}),
       // MailHog speaks plain SMTP on 1025 (no TLS); SendGrid requires TLS on 465.
       secure: port === 465,
       ...(user && pass ? { auth: { user, pass } } : {}),
@@ -48,32 +45,19 @@ export class MailerService {
     });
   }
 
-  async sendOrderConfirmed(input: {
-    to: string;
-    orderId: string;
-    totalAmount: string;
-    currency: string;
-  }): Promise<void> {
-    const message = renderOrderConfirmed(input);
-    try {
-      await this.transporter.sendMail({
-        from: this.from,
-        to: input.to,
-        subject: message.subject,
-        html: message.html,
-        headers: { 'X-Biobloom-Template': 'd-order-confirmed' },
-      });
-      this.logger.log(`Order confirmation email sent for order=${input.orderId}`);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : 'Unknown SMTP error';
-      this.logger.error(`Order confirmation email failed for order=${input.orderId}: ${detail}`);
   async send(args: SendArgs): Promise<{ accepted: boolean; templateId: string }> {
     const tpl = TEMPLATES[args.template];
     if (!tpl) {
       this.logger.error(`Unknown template ${args.template}`);
       return { accepted: false, templateId: '' };
     }
-    const message: RenderedMessage = tpl.render(args.data);
+    let message: RenderedMessage;
+    try {
+      message = tpl.render(args.data);
+    } catch (e) {
+      this.logger.error(`Mail ${args.template} render FAILED: ${(e as Error).message}`);
+      return { accepted: false, templateId: tpl.id };
+    }
     try {
       await this.transporter.sendMail({
         from: this.from,

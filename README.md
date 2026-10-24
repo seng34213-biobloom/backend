@@ -106,6 +106,24 @@ Subscriptions run every 14, 30 or 60 days for 1 to 10 units. Their status moves 
 
 Stock queries filter on the expiry date itself, so an expired batch is never sold even before the sweep runs. A failed email is logged and never stops the sweep.
 
+## Email notifications
+
+Feature modules emit domain events through `NotificationsService` (`emitOrderConfirmed`, `emitSubscriptionCancelled`, …) and return straight away. Listeners send the email afterwards, so a mail failure never blocks or fails the request. In development every email lands in MailHog at http://localhost:8025.
+
+| Event                                                  | Email                           | Sent to            |
+| ------------------------------------------------------ | ------------------------------- | ------------------ |
+| `order.confirmed`                                      | Order confirmed, with the total | Customer           |
+| `order.shipped`, `order.delivered`                     | Order shipped, order delivered  | Customer           |
+| `subscription.renewed`, `subscription.cancelled`       | Renewal, cancellation           | Customer           |
+| `subscription.stockDelayed`                            | Delivery delayed, not charged   | Customer           |
+| `subscription.chargeFailed`                            | Payment declined                | Customer           |
+| `refund.approved`                                      | Refund issued                   | Customer           |
+| `seller.approved`                                      | Welcome, with the portal link   | Seller             |
+| `batch.expiringSoon`                                   | Batch expiring soon             | Every active admin |
+| `seller.applied`, `seller.rejected`, `refund.rejected` | Logged only                     | —                  |
+
+Links in emails use `STOREFRONT_URL` and `SELLER_PORTAL_URL`. Every value placed in an email is HTML-escaped.
+
 ## API
 
 All routes are under `/api`. Invalid input returns `422 Unprocessable Entity`.

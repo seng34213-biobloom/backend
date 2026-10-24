@@ -87,11 +87,7 @@ describe('Atomic checkout (e2e)', () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication({ bodyParser: false });
     configureApp(app);
-    const captureRawBody = (
-      req: Request & { rawBody?: Buffer },
-      _res: unknown,
-      body: Buffer,
-    ) => {
+    const captureRawBody = (req: Request & { rawBody?: Buffer }, _res: unknown, body: Buffer) => {
       if (req.originalUrl?.startsWith('/api/webhooks/')) {
         req.rawBody = Buffer.from(body);
       }

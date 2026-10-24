@@ -32,7 +32,6 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
       { name: 'default', ttl: 60_000, limit: 100 },
       { name: 'auth', ttl: 900_000, limit: 20 },
     ]),
-    EventEmitterModule.forRoot(),
     // SDS §4.2 — feature modules emit domain events; NotificationsService sends the emails.
     EventEmitterModule.forRoot(),
     // SDS §5.6 — daily scheduled jobs such as the batch expiry sweep.
@@ -48,7 +47,6 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     CartModule,
     ShippingModule,
     OrdersModule,
-    NotificationsModule,
     SubscriptionsModule,
     HealthModule,
     AuthModule,
