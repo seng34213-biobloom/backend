@@ -202,11 +202,39 @@ export class SubscriptionsService {
       cancelledAt: true,
       createdAt: true,
       updatedAt: true,
+      // Product and variant names for the My Subscriptions dashboard cards
+      variant: {
+        select: {
+          id: true,
+          name: true,
+          size: true,
+          product: { select: { id: true, name: true, slug: true } },
+        },
+      },
     } as const;
   }
 
-  /** Returns the locked discount rate with four decimals, e.g. "0.1000". */
-  private toPublic<T extends { discountRate: Prisma.Decimal | string }>(sub: T) {
-    return { ...sub, discountRate: new Prisma.Decimal(sub.discountRate).toFixed(4) };
+  /**
+   * Shapes a subscription for the API: the locked discount rate with four
+   * decimals (e.g. "0.1000"), and the product and variant as separate objects.
+   */
+  private toPublic<
+    T extends {
+      discountRate: Prisma.Decimal | string;
+      variant: {
+        id: string;
+        name: string;
+        size: string;
+        product: { id: string; name: string; slug: string };
+      };
+    },
+  >(sub: T) {
+    const { variant, ...rest } = sub;
+    return {
+      ...rest,
+      discountRate: new Prisma.Decimal(sub.discountRate).toFixed(4),
+      product: variant.product,
+      variant: { id: variant.id, name: variant.name, size: variant.size },
+    };
   }
 }
