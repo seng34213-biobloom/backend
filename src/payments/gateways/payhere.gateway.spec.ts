@@ -11,6 +11,7 @@ describe('PayHereGateway', () => {
       const values: Record<string, string> = {
         PAYHERE_MERCHANT_ID: merchantId,
         PAYHERE_MERCHANT_SECRET: merchantSecret,
+        PAYHERE_CHECKOUT_URL: 'https://sandbox.payhere.lk/pay/checkout',
         PAYHERE_RETURN_URL: 'https://shop.example/return',
         PAYHERE_CANCEL_URL: 'https://shop.example/cancel',
         PAYHERE_NOTIFY_URL: 'https://api.example/api/webhooks/payhere',

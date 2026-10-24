@@ -32,9 +32,7 @@ export class PayHereGateway {
 
     return {
       orderReference,
-      checkoutUrl:
-        this.config.get<string>('PAYHERE_CHECKOUT_URL') ??
-        'https://sandbox.payhere.lk/pay/checkout',
+      checkoutUrl: this.requiredConfig('PAYHERE_CHECKOUT_URL'),
       params: {
         merchant_id: merchantId,
         return_url: this.requiredConfig('PAYHERE_RETURN_URL'),

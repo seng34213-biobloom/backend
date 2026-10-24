@@ -85,7 +85,7 @@ describe('AuthService', () => {
       const [payload, options] = (jwt.signAsync as jest.Mock).mock.calls[0];
       expect(payload).toMatchObject({ sub: 'c1', role: 'CUSTOMER', actorType: 'customer' });
       expect(payload.jti).toEqual(out.jti);
-      expect(options).toEqual({ expiresIn: '15d', algorithm: 'HS256' });
+      expect(options).toEqual({ expiresIn: 15 * 86400, algorithm: 'HS256' });
     });
 
     it('issues a staff token with an 8 hour TTL for an admin', async () => {

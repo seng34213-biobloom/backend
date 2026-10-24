@@ -222,7 +222,7 @@ export class AuthService {
       jti,
     };
     const token = await this.jwt.signAsync(payload, {
-      expiresIn,
+      expiresIn: ttlSec,
       algorithm: 'HS256',
     });
     return {

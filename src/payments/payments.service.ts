@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OrderStatus, PaymentGateway, PaymentStatus, Prisma } from '@prisma/client';
@@ -35,6 +41,7 @@ export class PaymentsService {
     currency: string;
     gateway: PaymentGateway;
   }): Promise<{ succeeded: boolean; refundId: string; failureReason?: string }> {
+    this.assertWebhookSecret(input.gateway);
     if (Number(input.amount) <= 0) {
       return { succeeded: false, refundId: '', failureReason: 'Refund amount must be positive' };
     }
@@ -55,6 +62,7 @@ export class PaymentsService {
     currency: string;
     gateway: PaymentGateway;
   }): Promise<PaymentIntent> {
+    this.assertWebhookSecret(input.gateway);
     let intent: PaymentIntent;
 
     if (this.config.get<string>('NODE_ENV') === 'test') {
@@ -117,6 +125,21 @@ export class PaymentsService {
     });
     this.logger.log(`Payment intent ${intent.gatewayPaymentId} created for order=${input.orderId}`);
     return intent;
+  }
+
+  private assertWebhookSecret(gateway: PaymentGateway): void {
+    if (this.config.get<string>('NODE_ENV') !== 'production') return;
+    const secret =
+      gateway === PaymentGateway.STRIPE
+        ? this.config.get<string>('STRIPE_WEBHOOK_SECRET')
+        : this.config.get<string>('PAYHERE_MERCHANT_SECRET');
+    const name =
+      gateway === PaymentGateway.STRIPE ? 'STRIPE_WEBHOOK_SECRET' : 'PAYHERE_MERCHANT_SECRET';
+    if (!secret) {
+      throw new ServiceUnavailableException(
+        `${name} is required for production payment operations`,
+      );
+    }
   }
 
   async handleStripeWebhook(rawBody: Buffer, signature: string | undefined) {
