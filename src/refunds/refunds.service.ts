@@ -5,7 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { OrderStatus, PaymentStatus, RefundStatus, Role } from '@prisma/client';
+import { OrderStatus, PaymentStatus, Prisma, RefundStatus, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { InventoryService } from '../inventory/inventory.service';
@@ -41,11 +41,11 @@ export class RefundsService {
       );
     }
 
-    const orderTotal = Number(order.totalAmount);
-    const amount = dto.amount ?? orderTotal;
-    if (amount > orderTotal) {
+    const orderTotal = order.totalAmount;
+    const amount = dto.amount === undefined ? orderTotal : new Prisma.Decimal(dto.amount);
+    if (!amount.equals(orderTotal)) {
       throw new BadRequestException(
-        `Refund amount ${amount.toFixed(2)} exceeds order total ${orderTotal.toFixed(2)}`,
+        `Refund amount must match the full order total of ${orderTotal.toFixed(2)}`,
       );
     }
 
@@ -60,12 +60,12 @@ export class RefundsService {
       data: {
         orderId,
         customerId,
-        amount: amount.toFixed(2),
+        amount: orderTotal.toFixed(2),
         reason: dto.reason.trim(),
         status: RefundStatus.REQUESTED,
       },
     });
-    this.logger.log(`Refund requested: order=${orderId} amount=${amount.toFixed(2)}`);
+    this.logger.log(`Refund requested: order=${orderId} amount=${orderTotal.toFixed(2)}`);
     return created;
   }
 
