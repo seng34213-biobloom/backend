@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Production environment validation for signing, payment, token-encryption, and upload configuration; user-based API throttling, CSP headers, verified private proof-image uploads, and customer ownership coverage (#37)
 - Staging deploy: every push to `develop` that passes CI is deployed to Render, and the job waits until `/api/health` reports that commit (#49)
 - `GET /api/health` reports the deployed `commit` (#49)
 - Admin analytics API: `GET /api/admin/analytics/dashboard` (today's revenue, pending orders, active subscriptions, batches expiring soon), `/revenue-series` (zero-filled daily revenue, 30 days by default) and `/top-selling`; only paid orders count as revenue (#45)
