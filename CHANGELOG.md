@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Staging deploy: every push to `develop` that passes CI is deployed to Render, and the job waits until `/api/health` reports that commit (#49)
 - `GET /api/health` reports the deployed `commit` (#49)
+- E2E tests use unique per-run fixtures, verify shipping bracket boundaries and reject tampered Stripe webhooks; CI runs the integration suite twice against the same PostgreSQL, Redis and MailHog services (#34)
 - Admin analytics API: `GET /api/admin/analytics/dashboard` (today's revenue, pending orders, active subscriptions, batches expiring soon), `/revenue-series` (zero-filled daily revenue, 30 days by default) and `/top-selling`; only paid orders count as revenue (#45)
 - Transactional email for order confirmed, shipped and delivered, subscription renewed, cancelled, stock delayed and charge failed, refund issued and seller approved, sent from domain events through `NotificationsService` (#43)
 - Cancelling a subscription now sends the cancellation confirmation email (#43)
