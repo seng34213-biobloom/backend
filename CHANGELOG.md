@@ -32,6 +32,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The auth rate limit of 20 requests per 15 minutes now applies only to register and login. It had applied to every route, so `/api/health` failed Render's health checks and staging kept restarting (#55)
+- `GET /api/products` and `GET /api/products/:slug` now return the `seller` (`id`, `businessName`), or `null` for admin-managed products; the storefront product pages failed without it (#55)
 - Restored a single notifications module after the payment webhooks merge left duplicate mailer, listener and template code that stopped `develop` from building (#43)
 
 ### Changed
