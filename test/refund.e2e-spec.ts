@@ -6,6 +6,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { fixtureEmail, fixtureNamespace } from './helpers/fixtures';
 
 type Agent = ReturnType<typeof request.agent>;
 
@@ -18,7 +19,7 @@ describe('Refund flow (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
 
-  const stamp = `refund${Date.now()}`;
+  const stamp = fixtureNamespace('refund');
   const password = 'RefundTest2026';
   const fixture = {
     customerId: '',
@@ -61,7 +62,7 @@ describe('Refund flow (e2e)', () => {
     const passwordHash = await bcrypt.hash(password, 4);
     const customerRecord = await prisma.customer.create({
       data: {
-        email: `${stamp}.customer@example.com`,
+        email: fixtureEmail(stamp, 'customer'),
         passwordHash,
         name: 'Refund Customer',
       },
@@ -81,7 +82,7 @@ describe('Refund flow (e2e)', () => {
     fixture.adminId = (
       await prisma.adminUser.create({
         data: {
-          email: `${stamp}.admin@example.com`,
+          email: fixtureEmail(stamp, 'admin'),
           passwordHash,
           name: 'Refund Admin',
           role: AdminRole.ADMIN,
@@ -89,8 +90,8 @@ describe('Refund flow (e2e)', () => {
       })
     ).id;
 
-    customer = await signIn(`${stamp}.customer@example.com`);
-    admin = await signIn(`${stamp}.admin@example.com`);
+    customer = await signIn(fixtureEmail(stamp, 'customer'));
+    admin = await signIn(fixtureEmail(stamp, 'admin'));
 
     const product = await prisma.product.create({
       data: {
