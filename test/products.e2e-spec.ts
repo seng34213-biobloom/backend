@@ -98,6 +98,8 @@ describe('Products catalogue (e2e)', () => {
 
     expect(res.body).toMatchObject({ page: 1, pageSize: 24, total: 1 });
     expect(res.body.items.map((p: { slug: string }) => p.slug)).toEqual([slugs.sellable]);
+    // Fixtures have no seller, so they are admin-managed
+    expect(res.body.items[0].seller).toBeNull();
     // Active variants ordered by weight, including the one without stock
     expect(res.body.items[0].variants.map((v: { size: string }) => v.size)).toEqual([
       '250g',
@@ -137,6 +139,7 @@ describe('Products catalogue (e2e)', () => {
       daysFromToday(90).toISOString(),
     );
     expect(res.body.earliestExpiryByVariant[unsellableVariantId]).toBeNull();
+    expect(res.body.seller).toBeNull();
   });
 
   it('returns 404 for an unknown or inactive slug', async () => {

@@ -14,6 +14,7 @@ const productRow = (overrides: Record<string, unknown> = {}) => ({
   basePrice: decimal('1500.00'),
   unitWeightGrams: 320,
   active: true,
+  seller: { id: 's1', businessName: 'Highland Jars' },
   variants: [
     {
       id: 'v-small',
@@ -97,6 +98,22 @@ describe('ProductsService', () => {
       });
       expect(out.items[0].variants.map((v) => v.price)).toEqual(['1500.00', '2800.00']);
     });
+
+    it('returns the seller, or null for an admin-managed product', async () => {
+      (prisma.product.findMany as jest.Mock).mockResolvedValue([
+        productRow(),
+        productRow({ id: 'p2', slug: 'house-jam', seller: null }),
+      ]);
+
+      const out = await svc.list({ page: 1, pageSize: 24 });
+
+      expect(out.items.map((p) => p.seller)).toEqual([
+        { id: 's1', businessName: 'Highland Jars' },
+        null,
+      ]);
+      const [args] = (prisma.product.findMany as jest.Mock).mock.calls[0];
+      expect(args.include.seller).toEqual({ select: { id: true, businessName: true } });
+    });
   });
 
   describe('getBySlug', () => {
@@ -128,6 +145,7 @@ describe('ProductsService', () => {
         'v-large': null,
       });
       expect(out.variants).toHaveLength(2);
+      expect(out.seller).toEqual({ id: 's1', businessName: 'Highland Jars' });
     });
   });
 });
