@@ -20,6 +20,7 @@ import { OrdersModule } from './orders/orders.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
+import { ReviewsModule } from './reviews/reviews.module';
 import { ShippingModule } from './shipping/shipping.module';
 import { RedisModule } from './redis/redis.module';
 import { RefundsModule } from './refunds/refunds.module';
@@ -53,6 +54,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     AnalyticsModule,
     FulfilmentModule,
     RefundsModule,
+    ReviewsModule,
     SubscriptionsModule,
     HealthModule,
     AuthModule,
