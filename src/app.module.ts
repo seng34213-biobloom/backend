@@ -14,6 +14,7 @@ import { BatchesModule } from './batches/batches.module';
 import { CartModule } from './cart/cart.module';
 import { CsrfMiddleware } from './common/middleware/csrf.middleware';
 import { HealthModule } from './health/health.module';
+import { FulfilmentModule } from './fulfilment/fulfilment.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { OrdersModule } from './orders/orders.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -21,6 +22,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
 import { ShippingModule } from './shipping/shipping.module';
 import { RedisModule } from './redis/redis.module';
+import { RefundsModule } from './refunds/refunds.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 
 @Module({
@@ -49,6 +51,8 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     ShippingModule,
     OrdersModule,
     AnalyticsModule,
+    FulfilmentModule,
+    RefundsModule,
     SubscriptionsModule,
     HealthModule,
     AuthModule,
