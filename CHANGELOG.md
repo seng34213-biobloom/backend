@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Verified-purchase product reviews with admin moderation and public approved-review summaries (#31)
+- Customer support tickets with customer reopen and admin resolution/closure workflows (#31)
 - Staging deploy: every push to `develop` that passes CI is deployed to Render, and the job waits until `/api/health` reports that commit (#49)
 - `GET /api/health` reports the deployed `commit` (#49)
 - E2E tests use unique per-run fixtures, verify shipping bracket boundaries and reject tampered Stripe webhooks; CI runs the integration suite twice against the same PostgreSQL, Redis and MailHog services (#34)
