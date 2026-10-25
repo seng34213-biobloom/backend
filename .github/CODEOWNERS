@@ -1,0 +1,53 @@
+# Code owners for the Bio Bloom API.
+#
+# GitHub requests a review from the owners of every path a pull request
+# touches; the last matching pattern wins. The author of a pull request is
+# never requested, so the other owner reviews it.
+
+# Shared by both backend developers: schema, migrations, tests, docs and
+# anything not matched below.
+* @ovindu17 @Prageethek
+
+# Ovindu: project setup, catalogue, inventory, batches, subscriptions and
+# billing, notifications, analytics, scheduled jobs, CI/CD and deployment
+/package.json @ovindu17
+/docker-compose.yml @ovindu17
+/Dockerfile @ovindu17
+/.dockerignore @ovindu17
+/.github/workflows/ @ovindu17
+/load-test/ @ovindu17
+/src/main.ts @ovindu17
+/src/app.setup.ts @ovindu17
+/src/prisma/ @ovindu17
+/src/health/ @ovindu17
+/src/audit/ @ovindu17
+/src/common/locks/ @ovindu17
+/src/products/products.service.ts @ovindu17
+/src/products/products.service.spec.ts @ovindu17
+/src/inventory/ @ovindu17
+/src/batches/ @ovindu17
+/src/subscriptions/ @ovindu17
+/src/notifications/ @ovindu17
+/src/analytics/ @ovindu17
+
+# Prageeth: authentication and security, sellers, product management, cart,
+# shipping, checkout and orders, payments, fulfilment, refunds, reviews,
+# support, delivery and uploads
+/src/auth/ @Prageethek
+/src/config/ @Prageethek
+/src/common/guards/ @Prageethek
+/src/common/middleware/ @Prageethek
+/src/redis/ @Prageethek
+/src/sellers/ @Prageethek
+/src/products/products-admin.* @Prageethek
+/src/cart/ @Prageethek
+/src/shipping/ @Prageethek
+/src/addresses/ @Prageethek
+/src/orders/ @Prageethek
+/src/payments/ @Prageethek
+/src/fulfilment/ @Prageethek
+/src/refunds/ @Prageethek
+/src/reviews/ @Prageethek
+/src/support/ @Prageethek
+/src/delivery/ @Prageethek
+/src/uploads/ @Prageethek
