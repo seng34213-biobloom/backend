@@ -21,7 +21,7 @@ export class AuthController {
 
   // SDS §7.4 — burst limit on registration (20 / 15 min / IP).
   @Public()
-  @Throttle({ auth: { limit: 20, ttl: 900_000 } })
+  @Throttle({ auth: {} })
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   async register(@Body() dto: RegisterDto): Promise<{ id: string; email: string; name: string }> {
@@ -30,7 +30,7 @@ export class AuthController {
 
   // SDS §7.4 — login limited to 20 attempts per IP per 15-min window.
   @Public()
-  @Throttle({ auth: { limit: 20, ttl: 900_000 } })
+  @Throttle({ auth: {} })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(

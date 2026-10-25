@@ -63,4 +63,34 @@ describe('validateEnvironment', () => {
       }),
     ).toThrow(/UPLOADS_BUCKET/);
   });
+
+  describe('with APP_ENV=staging', () => {
+    const stagingSecrets = {
+      ...productionSecrets,
+      APP_ENV: 'staging',
+      STRIPE_SECRET_KEY: 'sk_test_' + 'b'.repeat(32),
+      AWS_REGION: undefined,
+      UPLOADS_BUCKET: undefined,
+    };
+
+    it('accepts Stripe test keys and no uploads bucket', () => {
+      expect(validateEnvironment(stagingSecrets)).toBe(stagingSecrets);
+    });
+
+    it.each([
+      ['JWT_SECRET', 'change-me-to-a-long-development-secret'],
+      ['STRIPE_WEBHOOK_SECRET', 'whsec_replace_me'],
+      ['SUBSCRIPTION_TOKEN_ENC_KEY', 'short'],
+    ])('still rejects a weak %s', (name, value) => {
+      expect(() => validateEnvironment({ ...stagingSecrets, [name]: value })).toThrow(
+        new RegExp(name),
+      );
+    });
+
+    it('still requires the Stripe keys', () => {
+      expect(() =>
+        validateEnvironment({ ...stagingSecrets, STRIPE_SECRET_KEY: undefined }),
+      ).toThrow(/missing: STRIPE_SECRET_KEY/);
+    });
+  });
 });
