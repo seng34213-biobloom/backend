@@ -1,7 +1,8 @@
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 describe('PrismaService (integration)', () => {
-  const prisma = new PrismaService();
+  const prisma = new PrismaService(new ConfigService());
 
   beforeAll(async () => {
     await prisma.onModuleInit();

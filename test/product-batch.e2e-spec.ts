@@ -1,8 +1,9 @@
 import { randomUUID } from 'crypto';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 describe('Product batches (integration)', () => {
-  const prisma = new PrismaService();
+  const prisma = new PrismaService(new ConfigService());
   // Unique suffix so the test never collides with existing rows
   const suffix = randomUUID().slice(0, 8);
   let productId: string;

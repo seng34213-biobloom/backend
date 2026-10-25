@@ -13,7 +13,18 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   configureApp(app);
 
-  app.use(helmet());
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'none'"],
+          frameAncestors: ["'none'"],
+          baseUri: ["'none'"],
+          formAction: ["'none'"],
+        },
+      },
+    }),
+  );
 
   const verifyRawBody = (req: Request & { rawBody?: Buffer }, _res: unknown, buf: Buffer) => {
     if (req.originalUrl?.startsWith('/api/webhooks/')) {

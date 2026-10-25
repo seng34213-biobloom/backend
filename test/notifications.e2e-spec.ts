@@ -1,10 +1,12 @@
 import { INestApplication } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test } from '@nestjs/testing';
 import * as bcrypt from 'bcryptjs';
 import { AppModule } from '../src/app.module';
 import { ExpiryCronService } from '../src/batches/expiry-cron.service';
 import { InventoryService } from '../src/inventory/inventory.service';
+import { MailerService } from '../src/notifications/mailer.service';
 import { NotificationsService } from '../src/notifications/notifications.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { SubscriptionsService } from '../src/subscriptions/subscriptions.service';
@@ -84,8 +86,18 @@ describe('Notifications and the batch expiry sweep (e2e)', () => {
   today.setUTCHours(0, 0, 0, 0);
   const daysFromToday = (n: number) => new Date(today.getTime() + n * 86_400_000);
 
-  const boot = async () => {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  // ConfigService keeps the values it validated at startup, so a test that needs
+  // a different SMTP port gives the mailer its own config instead of changing
+  // process.env.
+  const boot = async (smtpPort?: string) => {
+    const builder = Test.createTestingModule({ imports: [AppModule] });
+    if (smtpPort) {
+      builder.overrideProvider(MailerService).useFactory({
+        factory: () =>
+          new MailerService(new ConfigService({ ...process.env, SMTP_PORT: smtpPort })),
+      });
+    }
+    const moduleRef = await builder.compile();
     const app = moduleRef.createNestApplication();
     await app.init();
     return app;
@@ -246,13 +258,11 @@ describe('Notifications and the batch expiry sweep (e2e)', () => {
   describe('with the mail server unreachable', () => {
     let app: INestApplication;
     let prisma: PrismaService;
-    const smtpPort = process.env.SMTP_PORT;
     const admin = fixtureEmail(stamp, 'unreachable');
 
     beforeAll(async () => {
       // Nothing listens on port 1, so every send fails
-      process.env.SMTP_PORT = '1';
-      app = await boot();
+      app = await boot('1');
       prisma = app.get(PrismaService);
       await prisma.adminUser.create({
         data: {
@@ -265,8 +275,6 @@ describe('Notifications and the batch expiry sweep (e2e)', () => {
     });
 
     afterAll(async () => {
-      if (smtpPort === undefined) delete process.env.SMTP_PORT;
-      else process.env.SMTP_PORT = smtpPort;
       if (prisma) {
         await prisma.product.deleteMany({ where: { slug: { startsWith: stamp } } });
         await prisma.adminUser.deleteMany({ where: { email: admin } });

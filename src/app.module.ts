@@ -3,7 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { AddressesModule } from './addresses/addresses.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { AuditModule } from './audit/audit.module';
@@ -12,7 +12,9 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 import { BatchesModule } from './batches/batches.module';
 import { CartModule } from './cart/cart.module';
+import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
 import { CsrfMiddleware } from './common/middleware/csrf.middleware';
+import { validateEnvironment } from './config/env.validation';
 import { DeliveryModule } from './delivery/delivery.module';
 import { HealthModule } from './health/health.module';
 import { FulfilmentModule } from './fulfilment/fulfilment.module';
@@ -27,6 +29,7 @@ import { RedisModule } from './redis/redis.module';
 import { RefundsModule } from './refunds/refunds.module';
 import { SellerModule } from './sellers/seller.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+import { UploadsModule } from './uploads/uploads.module';
 import { SupportModule } from './support/support.module';
 
 // Metadata key that @Throttle({ auth }) writes on a route.
@@ -37,6 +40,7 @@ const AUTH_THROTTLE_KEY = 'THROTTLER:LIMITauth';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ['.env.local', '.env'],
+      validate: validateEnvironment,
     }),
     // SDS §7.4 — "default" applies to every route, "auth" only to routes marked
     // @Throttle({ auth }). @nestjs/throttler 6 applies every named throttler to
@@ -74,13 +78,14 @@ const AUTH_THROTTLE_KEY = 'THROTTLER:LIMITauth';
     ReviewsModule,
     SupportModule,
     SubscriptionsModule,
+    UploadsModule,
     SellerModule,
     HealthModule,
     AuthModule,
   ],
   providers: [
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: UserThrottlerGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
   ],
 })

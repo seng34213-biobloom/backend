@@ -55,7 +55,12 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     await this.auth.logout(user);
-    res.clearCookie(AUTH_COOKIE_NAME, { path: '/' });
+    res.clearCookie(AUTH_COOKIE_NAME, {
+      path: '/',
+      httpOnly: true,
+      secure: this.cookieSecure,
+      sameSite: 'strict',
+    });
   }
 
   @Get('me')

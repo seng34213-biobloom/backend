@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Production environment validation for signing, payment, token-encryption, and upload configuration; user-based API throttling, CSP headers, verified private proof-image uploads, and customer ownership coverage (#37)
 - Weight-bracket shipping quotes sum cart-item weights, apply inclusive rate boundaries, and cache rate brackets in Redis for five minutes (#16)
 - Shipped-order rider assignments, audited delivery status updates, proof URLs, GPS capture and FCM token registration; failed assignments are terminal and are not automatically reassigned (#32)
 - Verified-purchase product reviews with admin moderation and public approved-review summaries (#31)
