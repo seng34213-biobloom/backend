@@ -49,7 +49,7 @@ describe('ShippingService', () => {
     expect(cache.set).toHaveBeenCalledWith('shipping:rates', expect.any(String), 'EX', 300);
   });
 
- it('calculates the 1250 g total from multiple cart items', async () => {
+  it('calculates the 1250 g total from multiple cart items', async () => {
     await expect(
       service.calculate([
         { unitWeightGrams: 250, quantity: 2 },
