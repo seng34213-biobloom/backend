@@ -67,7 +67,7 @@ src/
   inventory/        FIFO stock checks and batch allocation
   notifications/    Domain events and transactional email (MailHog in dev)
   products/         Public product catalogue API
-  subscriptions/    Subscribe & Save lifecycle and payment token encryption
+  subscriptions/    Subscribe & Save lifecycle, daily billing and payment token encryption
   prisma/           PrismaService, available globally
 prisma/
   schema.prisma     Database schema
@@ -96,6 +96,19 @@ Subscriptions run every 14, 30 or 60 days for 1 to 10 units. Their status moves 
 
 - `availableStock(variantId)` and `checkStock(variantId, qty)` count only valid batches: not expired, not `DEPLETED`, quantity above zero.
 - `decrementForVariant(variantId, qty, tx)` must run inside a Prisma `$transaction`. It locks the valid batches with `SELECT ... FOR UPDATE`, takes stock earliest-expiry-first, marks emptied batches `DEPLETED` and throws `OutOfStockError` (HTTP 409) when stock is short, which rolls the transaction back.
+
+## Subscription billing
+
+`BillingCronService` runs every day at 06:00 UTC (SDS §5.4) and bills each `ACTIVE` subscription whose `nextBillingDate` is today or earlier:
+
+- Short stock, or a variant that is no longer sold: nothing is charged, and the customer gets the delivery-delayed email.
+- Otherwise the stored token is charged the variant price × quantity × (1 − the locked discount), plus the weight-based shipping fee, through `PaymentsService.chargeStoredToken`.
+- Paid: one transaction takes the stock FIFO and creates a `PAID` order and its `PAID` payment row. The customer gets the renewal email.
+- Declined: no order, no stock taken, and a `FAILED` payment row records the attempt. The customer gets the payment-declined email.
+
+Whatever the outcome, the billing date moves one interval forward from its previous value, so a late run keeps the schedule. One failing subscription never stops the run.
+
+Stripe tokens are stored as `<customer id>:<payment method id>` and charged off-session. PayHere tokens are charged through the Charging API with `PAYHERE_APP_ID` and `PAYHERE_APP_SECRET`. In tests no gateway is called: a token containing `fail` or `decline` is declined and any other token is approved.
 
 ## Batch expiry sweep
 

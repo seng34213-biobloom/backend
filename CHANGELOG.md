@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Daily Subscribe & Save billing at 06:00 UTC: each due active subscription is charged the discounted price plus shipping on its stored token, and a paid renewal becomes a `PAID` order with FIFO stock; short stock or a declined charge creates no order and takes no stock, and the billing date always moves one interval forward (#15)
+- `PaymentsService.chargeStoredToken` for off-session Stripe charges and the PayHere Charging API (#15)
 - Production environment validation for signing, payment, token-encryption, and upload configuration; user-based API throttling, CSP headers, verified private proof-image uploads, and customer ownership coverage (#37)
 - Weight-bracket shipping quotes sum cart-item weights, apply inclusive rate boundaries, and cache rate brackets in Redis for five minutes (#16)
 - Shipped-order rider assignments, audited delivery status updates, proof URLs, GPS capture and FCM token registration; failed assignments are terminal and are not automatically reassigned (#32)
