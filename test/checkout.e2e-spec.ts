@@ -7,6 +7,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { fixtureEmail, fixtureNamespace } from './helpers/fixtures';
 
 type Agent = ReturnType<typeof request.agent>;
 
@@ -21,7 +22,7 @@ describe('Atomic checkout (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
 
-  const stamp = `checkout${Date.now()}`;
+  const stamp = fixtureNamespace('checkout');
   const password = 'Sunrise2026';
   const stripeWebhookSecret = 'whsec_checkout_e2e_test_secret';
   const fixture = {
@@ -37,7 +38,7 @@ describe('Atomic checkout (e2e)', () => {
   const signIn = async (name: string): Promise<CustomerSession> => {
     const agent = request.agent(app.getHttpServer());
     const csrf = (await agent.get('/api/auth/csrf').expect(200)).body.csrfToken as string;
-    const email = `${name}.${stamp}@example.com`;
+    const email = fixtureEmail(stamp, name);
     const registered = await agent
       .post('/api/auth/register')
       .set('x-csrf-token', csrf)

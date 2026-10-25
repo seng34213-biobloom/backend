@@ -9,8 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Production environment validation for signing, payment, token-encryption, and upload configuration; user-based API throttling, CSP headers, verified private proof-image uploads, and customer ownership coverage (#37)
+- Verified-purchase product reviews with admin moderation and public approved-review summaries (#31)
+- Customer support tickets with customer reopen and admin resolution/closure workflows (#31)
 - Staging deploy: every push to `develop` that passes CI is deployed to Render, and the job waits until `/api/health` reports that commit (#49)
 - `GET /api/health` reports the deployed `commit` (#49)
+- E2E tests use unique per-run fixtures, verify shipping bracket boundaries and reject tampered Stripe webhooks; CI runs the integration suite twice against the same PostgreSQL, Redis and MailHog services (#34)
 - Admin analytics API: `GET /api/admin/analytics/dashboard` (today's revenue, pending orders, active subscriptions, batches expiring soon), `/revenue-series` (zero-filled daily revenue, 30 days by default) and `/top-selling`; only paid orders count as revenue (#45)
 - Transactional email for order confirmed, shipped and delivered, subscription renewed, cancelled, stock delayed and charge failed, refund issued and seller approved, sent from domain events through `NotificationsService` (#43)
 - Cancelling a subscription now sends the cancellation confirmation email (#43)
@@ -33,6 +36,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The auth rate limit of 20 requests per 15 minutes now applies only to register and login. It had applied to every route, so `/api/health` failed Render's health checks and staging kept restarting (#55)
+- `GET /api/products` and `GET /api/products/:slug` now return the `seller` (`id`, `businessName`), or `null` for admin-managed products; the storefront product pages failed without it (#55)
 - Restored a single notifications module after the payment webhooks merge left duplicate mailer, listener and template code that stopped `develop` from building (#43)
 
 ### Changed

@@ -4,12 +4,13 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { fixtureEmail, fixtureNamespace } from './helpers/fixtures';
 
 describe('Auth (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
 
-  const email = `customer.${Date.now()}@example.com`;
+  const email = fixtureEmail(fixtureNamespace('auth'), 'customer');
   const password = 'Sunset2026';
 
   // POST routes need the double-submit CSRF cookie and header
