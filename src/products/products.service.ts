@@ -12,6 +12,8 @@ export interface ProductListItem {
   category: string;
   basePrice: string;
   unitWeightGrams: number;
+  // Null for products managed directly by Bio Bloom admins
+  seller: { id: string; businessName: string } | null;
   variants: Array<{
     id: string;
     sku: string;
@@ -21,6 +23,8 @@ export interface ProductListItem {
     unitWeightGrams: number;
   }>;
 }
+
+const sellerSelect = { select: { id: true, businessName: true } } as const;
 
 function startOfTodayUtc(): Date {
   const d = new Date();
@@ -81,6 +85,7 @@ export class ProductsService {
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
         include: {
+          seller: sellerSelect,
           variants: {
             where: { active: true },
             orderBy: { unitWeightGrams: 'asc' },
@@ -98,6 +103,7 @@ export class ProductsService {
         category: p.category,
         basePrice: p.basePrice.toString(),
         unitWeightGrams: p.unitWeightGrams,
+        seller: p.seller,
         variants: p.variants.map((v) => ({
           id: v.id,
           sku: v.sku,
@@ -122,6 +128,7 @@ export class ProductsService {
     const product = await this.prisma.product.findUnique({
       where: { slug },
       include: {
+        seller: sellerSelect,
         variants: {
           where: { active: true },
           orderBy: { unitWeightGrams: 'asc' },
@@ -160,6 +167,7 @@ export class ProductsService {
       category: product.category,
       basePrice: product.basePrice.toString(),
       unitWeightGrams: product.unitWeightGrams,
+      seller: product.seller,
       variants: product.variants.map((v) => ({
         id: v.id,
         sku: v.sku,
