@@ -82,6 +82,8 @@ enum DeliveryAssignmentStatus {
   OUT_FOR_DELIVERY
   DELIVERED
   FAILED
+}
+
 enum ReviewStatus {
   PENDING
   APPROVED
@@ -350,7 +352,7 @@ model Order {
   payments           Payment[]
   refundRequests     RefundRequest[]
   deliveryAssignment DeliveryAssignment?
-  reviews         ProductReview[]
+  reviews            ProductReview[]
 
   @@index([customerId, placedAt])
   @@index([status])
