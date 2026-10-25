@@ -181,6 +181,7 @@ Staging runs on Render in Singapore: the `biobloom-api` web service, Render Post
 - Auto-deploy is off on the Render service, so a commit that fails CI is never deployed.
 - Migrations run with `prisma migrate deploy` when the service starts. Render only switches traffic to the new version once `/api/health` responds, so a failed deploy leaves the previous one live.
 - Environment variables are set on the Render service, not in the repo. The names match `.env.example`.
+- Render runs the API with `NODE_ENV=production`, so the production secret checks apply. Staging sets `APP_ENV=staging`, which allows Stripe test keys (`sk_test_…`) and starts without `AWS_REGION` and `UPLOADS_BUCKET`; proof uploads answer 503 until those are set. `JWT_SECRET` (32+ characters), `SUBSCRIPTION_TOKEN_ENC_KEY` (16+), `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` are still required, and none may contain a placeholder such as `change-me`, `dev-` or `example`.
 - Staging uses free instances, which sleep after 15 minutes without traffic. The first request after that takes up to a minute, and the 06:00 UTC expiry sweep only runs while the instance is awake.
 
 ## Branching
