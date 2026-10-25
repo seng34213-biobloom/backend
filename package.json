@@ -15,10 +15,10 @@
     "lint:fix": "eslint \"{src,test}/**/*.ts\" --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:cov": "jest --coverage",
-    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
+    "test": "node ./test/run-jest.cjs",
+    "test:watch": "node ./test/run-jest.cjs --watch",
+    "test:cov": "node ./test/run-jest.cjs --coverage",
+    "test:e2e": "node ./test/run-jest.cjs --config ./test/jest-e2e.json --runInBand",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
@@ -95,8 +95,17 @@
     "coveragePathIgnorePatterns": [
       "/node_modules/",
       "\\.module\\.ts$",
-      "main\\.ts$"
+      "main\\.ts$",
+      "/dto/",
+      "\\.controller\\.ts$"
     ],
+    "coverageThreshold": {
+      "global": {
+        "lines": 80,
+        "statements": 80,
+        "functions": 80
+      }
+    },
     "testEnvironment": "node"
   }
 }

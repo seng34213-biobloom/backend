@@ -40,6 +40,18 @@ describe('ShippingService', () => {
     expect(cache.set).toHaveBeenCalledWith('shipping:rates', expect.any(String), 'EX', 300);
   });
 
+  it.each([
+    [500, 'rate-1'],
+    [501, 'rate-2'],
+  ])('uses the correct shipping bracket at the %i g boundary', async (weight, bracketId) => {
+    await expect(
+      service.calculate([{ unitWeightGrams: weight, quantity: 1 }]),
+    ).resolves.toMatchObject({
+      totalWeightG: weight,
+      bracketId,
+    });
+  });
+
   it('uses valid cached rates without querying the database', async () => {
     cache.get.mockResolvedValue(
       JSON.stringify([
