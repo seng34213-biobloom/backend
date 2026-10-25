@@ -246,4 +246,64 @@ describe('Subscription billing (e2e)', () => {
     expect(touched).not.toContain(subs.cancelled.id);
     expect(touched).not.toContain(subs.notDue.id);
   });
+
+  describe('across concurrent and restarted runs', () => {
+    const concurrent: string[] = [];
+    let alreadyCharged = '';
+
+    beforeAll(async () => {
+      for (let i = 0; i < 3; i += 1) {
+        concurrent.push(await subscribe(ids.variant, 'cus_billing:pm_ok', today));
+      }
+      // A run that charged this cycle and then crashed before moving the date on
+      alreadyCharged = await subscribe(ids.variant, 'cus_billing:pm_ok', today);
+      await prisma.payment.create({
+        data: {
+          subscriptionId: alreadyCharged,
+          gateway: PaymentGateway.STRIPE,
+          gatewayPaymentId: `pi_before_crash_${stamp}`,
+          billingCycleKey: `${alreadyCharged}:${today.toISOString().slice(0, 10)}`,
+          amount: '2300.00',
+          status: 'PAID',
+        },
+      });
+
+      await Promise.all([billing.runBilling(today), billing.runBilling(today)]);
+    });
+
+    afterAll(async () => {
+      const subscriptionIds = [...concurrent, alreadyCharged];
+      await prisma.payment.deleteMany({ where: { subscriptionId: { in: subscriptionIds } } });
+      await prisma.subscription.deleteMany({ where: { id: { in: subscriptionIds } } });
+    });
+
+    it('charges each due subscription once when two runs overlap', async () => {
+      for (const id of concurrent) {
+        const payments = await prisma.payment.findMany({ where: { subscriptionId: id } });
+        expect(payments).toHaveLength(1);
+        expect(payments[0].status).toBe('PAID');
+        expect(await nextBillingDate(id)).toEqual(addDaysUtc(today, 30));
+      }
+      // 48 after the first run, minus 2 units for each of the three renewals
+      const batch = await prisma.productBatch.findUniqueOrThrow({ where: { id: ids.batch } });
+      expect(batch.currentQuantity).toBe(42);
+    });
+
+    it('creates exactly one order per renewed subscription', async () => {
+      const orderIds = (
+        await prisma.payment.findMany({
+          where: { subscriptionId: { in: concurrent } },
+          select: { orderId: true },
+        })
+      ).map((p) => p.orderId);
+      expect(new Set(orderIds).size).toBe(3);
+      expect(await prisma.order.count({ where: { customerId: ids.customer } })).toBe(4);
+    });
+
+    it('does not charge a cycle that was already charged before a restart', async () => {
+      const payments = await prisma.payment.findMany({ where: { subscriptionId: alreadyCharged } });
+      expect(payments.map((p) => p.gatewayPaymentId)).toEqual([`pi_before_crash_${stamp}`]);
+      expect(await nextBillingDate(alreadyCharged)).toEqual(addDaysUtc(today, 30));
+    });
+  });
 });
