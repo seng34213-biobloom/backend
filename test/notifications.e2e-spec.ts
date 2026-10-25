@@ -8,6 +8,7 @@ import { InventoryService } from '../src/inventory/inventory.service';
 import { NotificationsService } from '../src/notifications/notifications.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { SubscriptionsService } from '../src/subscriptions/subscriptions.service';
+import { fixtureEmail, fixtureNamespace } from './helpers/fixtures';
 
 /**
  * Domain events against Postgres, with the resulting emails checked in MailHog
@@ -78,7 +79,7 @@ const waitForMails = (marker: string, expected: number) =>
 const settle = () => new Promise((r) => setTimeout(r, 1000));
 
 describe('Notifications and the batch expiry sweep (e2e)', () => {
-  const stamp = `sweep${Date.now()}`;
+  const stamp = fixtureNamespace('notifications');
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
   const daysFromToday = (n: number) => new Date(today.getTime() + n * 86_400_000);
@@ -146,8 +147,8 @@ describe('Notifications and the batch expiry sweep (e2e)', () => {
       later: '',
     };
     const events: Array<{ name: string; batchId: string; daysUntilExpiry?: number }> = [];
-    const activeAdmins = [`ops.${stamp}@example.com`, `owner.${stamp}@example.com`];
-    const otherStaff = [`retired.${stamp}@example.com`, `packer.${stamp}@example.com`];
+    const activeAdmins = [fixtureEmail(stamp, 'ops'), fixtureEmail(stamp, 'owner')];
+    const otherStaff = [fixtureEmail(stamp, 'retired'), fixtureEmail(stamp, 'packer')];
 
     beforeAll(async () => {
       app = await boot();
@@ -246,7 +247,7 @@ describe('Notifications and the batch expiry sweep (e2e)', () => {
     let app: INestApplication;
     let prisma: PrismaService;
     const smtpPort = process.env.SMTP_PORT;
-    const admin = `unreachable.${stamp}@example.com`;
+    const admin = fixtureEmail(stamp, 'unreachable');
 
     beforeAll(async () => {
       // Nothing listens on port 1, so every send fails
@@ -293,8 +294,8 @@ describe('Notifications and the batch expiry sweep (e2e)', () => {
     let app: INestApplication;
     let prisma: PrismaService;
     let notifications: NotificationsService;
-    const customerEmail = `shopper.${stamp}@example.com`;
-    const sellerEmail = `kitchen.${stamp}@example.com`;
+    const customerEmail = fixtureEmail(stamp, 'shopper');
+    const sellerEmail = fixtureEmail(stamp, 'kitchen');
     const ids = { customer: '', order: '', subscription: '' };
 
     beforeAll(async () => {

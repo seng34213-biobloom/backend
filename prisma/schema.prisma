@@ -82,6 +82,16 @@ enum DeliveryAssignmentStatus {
   OUT_FOR_DELIVERY
   DELIVERED
   FAILED
+enum ReviewStatus {
+  PENDING
+  APPROVED
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
 }
 
 model Customer {
@@ -98,6 +108,8 @@ model Customer {
   cartItems      CartItem[]
   orders         Order[]
   refundRequests RefundRequest[]
+  reviews        ProductReview[]
+  supportTickets SupportTicket[]
 
   @@index([email])
   @@map("customer")
@@ -216,6 +228,7 @@ model Product {
 
   seller   Seller?          @relation(fields: [sellerId], references: [id], onDelete: Restrict)
   variants ProductVariant[]
+  reviews  ProductReview[]
 
   @@index([sellerId])
   @@index([category, active])
@@ -337,6 +350,7 @@ model Order {
   payments           Payment[]
   refundRequests     RefundRequest[]
   deliveryAssignment DeliveryAssignment?
+  reviews         ProductReview[]
 
   @@index([customerId, placedAt])
   @@index([status])
@@ -433,4 +447,43 @@ model RefundRequest {
   @@index([status])
   @@index([orderId])
   @@map("refund_request")
+}
+
+model ProductReview {
+  id         String       @id @default(uuid()) @db.Uuid
+  customerId String       @map("customer_id") @db.Uuid
+  productId  String       @map("product_id") @db.Uuid
+  orderId    String       @map("order_id") @db.Uuid
+  rating     Int
+  comment    String
+  status     ReviewStatus @default(PENDING)
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  order    Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@unique([customerId, productId])
+  @@index([productId, status, createdAt])
+  @@index([orderId])
+  @@map("product_review")
+}
+
+model SupportTicket {
+  id         String              @id @default(uuid()) @db.Uuid
+  customerId String              @map("customer_id") @db.Uuid
+  subject    String              @db.VarChar(160)
+  message    String
+  status     SupportTicketStatus @default(OPEN)
+  resolvedAt DateTime?           @map("resolved_at")
+  closedAt   DateTime?           @map("closed_at")
+  createdAt  DateTime            @default(now()) @map("created_at")
+  updatedAt  DateTime            @updatedAt @map("updated_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  @@index([customerId, createdAt])
+  @@index([status, createdAt])
+  @@map("support_ticket")
 }
