@@ -12,6 +12,21 @@ export interface VerifiedPaymentEvent {
   rawPayload: unknown;
 }
 
+export interface StoredTokenChargeRequest {
+  paymentId: string;
+  token: string;
+  amount: string;
+  currency: string;
+  idempotencyKey: string;
+  description: string;
+}
+
+export interface StoredTokenCharge {
+  succeeded: boolean;
+  gatewayPaymentId?: string;
+  failureReason?: string;
+}
+
 @Injectable()
 export class StripeGateway {
   constructor(private readonly config: ConfigService) {}
@@ -69,6 +84,54 @@ export class StripeGateway {
       currency: intent.currency,
       rawPayload: event,
     };
+  }
+
+  /**
+   * Off-session charge of a saved card for a Subscribe & Save renewal. The
+   * stored token is `<customer id>:<payment method id>`. A card decline comes
+   * back as a failed result; any other error is thrown so the caller can retry
+   * with the same idempotency key.
+   */
+  async chargeStoredToken(input: StoredTokenChargeRequest): Promise<StoredTokenCharge> {
+    const [customer, paymentMethod] = input.token.includes(':')
+      ? input.token.split(':', 2)
+      : [undefined, input.token];
+    try {
+      const intent = await this.client().paymentIntents.create(
+        {
+          amount: Math.round(Number(input.amount) * 100),
+          currency: input.currency.toLowerCase(),
+          customer,
+          payment_method: paymentMethod,
+          off_session: true,
+          confirm: true,
+          description: input.description,
+          metadata: { paymentId: input.paymentId },
+        },
+        { idempotencyKey: input.idempotencyKey },
+      );
+      if (intent.status === 'succeeded') return { succeeded: true, gatewayPaymentId: intent.id };
+      return {
+        succeeded: false,
+        gatewayPaymentId: intent.id,
+        failureReason: `payment_intent_${intent.status}`,
+      };
+    } catch (e) {
+      const err = e as {
+        type?: string;
+        code?: string;
+        decline_code?: string;
+        payment_intent?: { id: string };
+      };
+      if (err.type === 'StripeCardError') {
+        return {
+          succeeded: false,
+          gatewayPaymentId: err.payment_intent?.id,
+          failureReason: err.decline_code ?? err.code ?? 'card_declined',
+        };
+      }
+      throw e;
+    }
   }
 
   private client(): Stripe {

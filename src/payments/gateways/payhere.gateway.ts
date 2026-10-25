@@ -2,10 +2,22 @@ import { BadRequestException, Injectable, ServiceUnavailableException } from '@n
 import { ConfigService } from '@nestjs/config';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { PaymentGateway } from '@prisma/client';
-import type { VerifiedPaymentEvent } from './stripe.gateway';
+import type {
+  StoredTokenCharge,
+  StoredTokenChargeRequest,
+  VerifiedPaymentEvent,
+} from './stripe.gateway';
+
+interface PayHereChargeResponse {
+  status: number;
+  msg?: string;
+  data?: { payment_id?: number | string; status_code?: number | string; status_message?: string };
+}
 
 @Injectable()
 export class PayHereGateway {
+  private accessToken?: { value: string; expiresAt: number };
+
   constructor(private readonly config: ConfigService) {}
 
   createCheckout(input: {
@@ -111,6 +123,72 @@ export class PayHereGateway {
       currency: payhere_currency,
       rawPayload: payload,
     };
+  }
+
+  /**
+   * Charges a customer token saved through PayHere's preapproval flow, using
+   * the Charging API. A declined charge comes back as a failed result; an
+   * unreachable API or a failed OAuth call is thrown.
+   */
+  async chargeStoredToken(input: StoredTokenChargeRequest): Promise<StoredTokenCharge> {
+    const res = await fetch(`${this.apiUrl()}/merchant/v1/payment/charge`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${await this.getAccessToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        type: 'PAYMENT',
+        order_id: input.paymentId,
+        items: input.description,
+        currency: input.currency.toUpperCase(),
+        amount: Number(Number(input.amount).toFixed(2)),
+        customer_token: input.token,
+        custom_1: input.idempotencyKey,
+      }),
+    });
+    if (res.status >= 500) throw new Error(`PayHere charge responded ${res.status}`);
+    const body = (await res.json()) as PayHereChargeResponse;
+    const gatewayPaymentId =
+      body.data?.payment_id !== undefined ? String(body.data.payment_id) : undefined;
+    if (body.status === 1 && Number(body.data?.status_code) === 2) {
+      return { succeeded: true, gatewayPaymentId };
+    }
+    return {
+      succeeded: false,
+      gatewayPaymentId,
+      failureReason: body.data?.status_message ?? body.msg ?? 'charge_declined',
+    };
+  }
+
+  private async getAccessToken(): Promise<string> {
+    if (this.accessToken && this.accessToken.expiresAt > Date.now()) {
+      return this.accessToken.value;
+    }
+    const credentials = Buffer.from(
+      `${this.requiredConfig('PAYHERE_APP_ID')}:${this.requiredConfig('PAYHERE_APP_SECRET')}`,
+    ).toString('base64');
+    const res = await fetch(`${this.apiUrl()}/merchant/v1/oauth/token`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${credentials}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'grant_type=client_credentials',
+    });
+    if (!res.ok) throw new Error(`PayHere OAuth responded ${res.status}`);
+    const json = (await res.json()) as { access_token?: string; expires_in?: number };
+    if (!json.access_token) throw new Error('PayHere OAuth returned no access token');
+    // Refresh a minute early so the token never expires mid-request
+    this.accessToken = {
+      value: json.access_token,
+      expiresAt: Date.now() + Math.max(60, (json.expires_in ?? 300) - 60) * 1000,
+    };
+    return json.access_token;
+  }
+
+  private apiUrl(): string {
+    return this.config.get<string>('PAYHERE_API_URL') ?? 'https://sandbox.payhere.lk';
   }
 
   private requiredConfig(key: string): string {

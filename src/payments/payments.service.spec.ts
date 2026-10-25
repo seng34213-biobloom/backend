@@ -56,10 +56,12 @@ describe('PaymentsService', () => {
     stripe = {
       createIntent: jest.fn(),
       parseWebhook: jest.fn(),
+      chargeStoredToken: jest.fn(),
     } as unknown as jest.Mocked<StripeGateway>;
     payHere = {
       createCheckout: jest.fn(),
       parseWebhook: jest.fn(),
+      chargeStoredToken: jest.fn(),
     } as unknown as jest.Mocked<PayHereGateway>;
     events = { emit: jest.fn() } as unknown as jest.Mocked<EventEmitter2>;
     const config = {
@@ -226,5 +228,64 @@ describe('PaymentsService', () => {
       },
     });
     expect(events.emit).not.toHaveBeenCalled();
+  });
+
+  describe('chargeStoredToken', () => {
+    const charge = {
+      paymentId: 'payment-9',
+      gateway: PaymentGateway.STRIPE,
+      token: 'cus_1:pm_1',
+      amount: '2050.00',
+      currency: 'LKR',
+      idempotencyKey: 'sub-1:2026-11-01',
+      description: 'Bio Bloom Subscribe & Save 2026-11-01',
+    };
+
+    it('approves a stored token in test mode and declines one marked to fail', async () => {
+      await expect(service.chargeStoredToken(charge)).resolves.toEqual({
+        succeeded: true,
+        gatewayPaymentId: expect.stringMatching(/^pi_test_[a-f0-9]{24}$/),
+      });
+      await expect(
+        service.chargeStoredToken({
+          ...charge,
+          gateway: PaymentGateway.PAYHERE,
+          token: 'tok_will_fail',
+        }),
+      ).resolves.toEqual({
+        succeeded: false,
+        gatewayPaymentId: expect.stringMatching(/^payhere_test_/),
+        failureReason: 'card_declined',
+      });
+      expect(stripe.chargeStoredToken).not.toHaveBeenCalled();
+    });
+
+    it('charges through the matching gateway outside test mode', async () => {
+      useRealGateways = true;
+      stripe.chargeStoredToken.mockResolvedValue({ succeeded: true, gatewayPaymentId: 'pi_1' });
+      payHere.chargeStoredToken.mockResolvedValue({
+        succeeded: false,
+        failureReason: 'Insufficient funds',
+      });
+
+      await expect(service.chargeStoredToken(charge)).resolves.toEqual({
+        succeeded: true,
+        gatewayPaymentId: 'pi_1',
+      });
+      expect(stripe.chargeStoredToken).toHaveBeenCalledWith(charge);
+      await expect(
+        service.chargeStoredToken({ ...charge, gateway: PaymentGateway.PAYHERE }),
+      ).resolves.toEqual({ succeeded: false, failureReason: 'Insufficient funds' });
+    });
+
+    it('returns a gateway error instead of throwing', async () => {
+      useRealGateways = true;
+      stripe.chargeStoredToken.mockRejectedValue(new Error('socket hang up'));
+
+      await expect(service.chargeStoredToken(charge)).resolves.toEqual({
+        succeeded: false,
+        failureReason: 'gateway_error',
+      });
+    });
   });
 });
