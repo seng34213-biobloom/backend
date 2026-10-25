@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- k6 load tests in `load-test/`: checkout at 50 concurrent shoppers (p95 under 600 ms, under 1% failures) and one billing run over 200 due subscriptions (under 60 s), with a fixture and an admin-only billing trigger that production builds do not expose; the rate limits are configurable through `THROTTLE_*` for test environments (#68)
 - Daily Subscribe & Save billing at 06:00 UTC: each due active subscription is charged the discounted price plus shipping on its stored token, and a paid renewal becomes a `PAID` order with FIFO stock; short stock or a declined charge creates no order and takes no stock, and the billing date always moves one interval forward (#15)
 - `PaymentsService.chargeStoredToken` for off-session Stripe charges and the PayHere Charging API (#15)
 - CI/CD pipeline stages: unit tests with the coverage gate and an uploaded report, a dependency audit that fails on high or critical advisories, and a multi-stage Docker image that every push to `develop` publishes to GitHub Container Registry tagged with the commit SHA; staging deploys only after all of them pass, and a newer push cancels the older run (#62)

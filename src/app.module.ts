@@ -1,5 +1,5 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -35,6 +35,12 @@ import { SupportModule } from './support/support.module';
 // Metadata key that @Throttle({ auth }) writes on a route.
 const AUTH_THROTTLE_KEY = 'THROTTLER:LIMITauth';
 
+// A positive whole number from the environment, or the SDS §7.4 default
+function limitFrom(config: ConfigService, key: string, fallback: number): number {
+  const value = Number(config.get(key));
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -45,17 +51,26 @@ const AUTH_THROTTLE_KEY = 'THROTTLER:LIMITauth';
     // SDS §7.4 — "default" applies to every route, "auth" only to routes marked
     // @Throttle({ auth }). @nestjs/throttler 6 applies every named throttler to
     // every route unless it is skipped.
-    ThrottlerModule.forRoot([
-      { name: 'default', ttl: 60_000, limit: 100 },
-      {
-        name: 'auth',
-        ttl: 900_000,
-        limit: 20,
-        skipIf: (context) =>
-          !Reflect.hasMetadata(AUTH_THROTTLE_KEY, context.getHandler()) &&
-          !Reflect.hasMetadata(AUTH_THROTTLE_KEY, context.getClass()),
-      },
-    ]),
+    // The limits default to 100 per minute and 20 auth requests per 15 minutes;
+    // THROTTLE_* raises them for load tests run from one machine.
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => [
+        {
+          name: 'default',
+          ttl: limitFrom(config, 'THROTTLE_DEFAULT_TTL_MS', 60_000),
+          limit: limitFrom(config, 'THROTTLE_DEFAULT_LIMIT', 100),
+        },
+        {
+          name: 'auth',
+          ttl: limitFrom(config, 'THROTTLE_AUTH_TTL_MS', 900_000),
+          limit: limitFrom(config, 'THROTTLE_AUTH_LIMIT', 20),
+          skipIf: (context) =>
+            !Reflect.hasMetadata(AUTH_THROTTLE_KEY, context.getHandler()) &&
+            !Reflect.hasMetadata(AUTH_THROTTLE_KEY, context.getClass()),
+        },
+      ],
+    }),
     // SDS §4.2 — feature modules emit domain events; NotificationsService sends the emails.
     EventEmitterModule.forRoot(),
     // SDS §5.6 — daily scheduled jobs such as the batch expiry sweep.

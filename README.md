@@ -73,6 +73,7 @@ prisma/
   schema.prisma     Database schema
   migrations/       SQL migrations, applied in order
 test/               Integration tests
+load-test/          k6 load tests and their fixture, see load-test/README.md
 ```
 
 ## Data model

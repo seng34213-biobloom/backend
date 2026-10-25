@@ -3,8 +3,8 @@
 -- Creates an admin (loadtest-admin@example.com), 200 customers
 -- (loadtest-001@example.com to loadtest-200@example.com), each with one
 -- address and one Subscribe & Save subscription due today, and a load-test
--- product with four variants holding 500 units each, so stock never limits
--- the measurement. Every account's password is Password123!.
+-- product with four variants holding 20,000 units each, enough for a full
+-- checkout run, so stock never limits the measurement. Every account's password is Password123!.
 --
 -- Re-running replaces the previous fixture. Pass the API's
 -- SUBSCRIPTION_TOKEN_ENC_KEY as enc_key so the job can decrypt the tokens:
@@ -57,7 +57,7 @@ FROM lt_variant v CROSS JOIN product p WHERE p.slug = 'loadtest-kithul-jaggery';
 
 INSERT INTO product_batch (id, product_variant_id, batch_number, manufactured_date,
   expiry_date, initial_quantity, current_quantity, updated_at)
-SELECT gen_random_uuid(), id, 'LOADTEST', CURRENT_DATE - 1, CURRENT_DATE + 365, 500, 500, now()
+SELECT gen_random_uuid(), id, 'LOADTEST', CURRENT_DATE - 1, CURRENT_DATE + 365, 20000, 20000, now()
 FROM lt_variant;
 
 INSERT INTO customer (id, email, password_hash, name, updated_at)
