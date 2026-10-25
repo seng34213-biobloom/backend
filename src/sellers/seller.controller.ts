@@ -14,7 +14,7 @@ export class SellerController {
   constructor(private readonly sellers: SellerService) {}
 
   @Public()
-  @Throttle({ auth: { limit: 20, ttl: 900_000 } })
+  @Throttle({ auth: {} })
   @Post('apply')
   @HttpCode(HttpStatus.CREATED)
   async apply(@Body() dto: ApplyDto) {
