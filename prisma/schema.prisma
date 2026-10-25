@@ -76,6 +76,14 @@ enum RefundStatus {
   PROCESSED
 }
 
+enum DeliveryAssignmentStatus {
+  ASSIGNED
+  PICKED_UP
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED
+}
+
 enum ReviewStatus {
   PENDING
   APPROVED
@@ -177,6 +185,8 @@ model DeliveryUser {
   active       Boolean  @default(true)
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
+
+  assignments DeliveryAssignment[]
 
   @@map("delivery_user")
 }
@@ -336,16 +346,40 @@ model Order {
   createdAt         DateTime      @default(now()) @map("created_at")
   updatedAt         DateTime      @updatedAt @map("updated_at")
 
-  customer        Customer        @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  shippingAddress Address         @relation(fields: [shippingAddressId], references: [id], onDelete: Restrict)
-  items           OrderItem[]
-  payments        Payment[]
-  refundRequests  RefundRequest[]
-  reviews         ProductReview[]
+  customer           Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  shippingAddress    Address             @relation(fields: [shippingAddressId], references: [id], onDelete: Restrict)
+  items              OrderItem[]
+  payments           Payment[]
+  refundRequests     RefundRequest[]
+  deliveryAssignment DeliveryAssignment?
+  reviews            ProductReview[]
 
   @@index([customerId, placedAt])
   @@index([status])
   @@map("order")
+}
+
+model DeliveryAssignment {
+  id             String                   @id @default(uuid()) @db.Uuid
+  orderId        String                   @unique @map("order_id") @db.Uuid
+  deliveryUserId String                   @map("delivery_user_id") @db.Uuid
+  status         DeliveryAssignmentStatus @default(ASSIGNED)
+  proofPhotoUrl  String?                  @map("proof_photo_url")
+  latitude       Decimal?                 @db.Decimal(10, 7)
+  longitude      Decimal?                 @db.Decimal(10, 7)
+  assignedAt     DateTime                 @default(now()) @map("assigned_at")
+  pickedUpAt     DateTime?                @map("picked_up_at")
+  deliveredAt    DateTime?                @map("delivered_at")
+  failedAt       DateTime?                @map("failed_at")
+  failureReason  String?                  @map("failure_reason")
+  createdAt      DateTime                 @default(now()) @map("created_at")
+  updatedAt      DateTime                 @updatedAt @map("updated_at")
+
+  order        Order        @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  deliveryUser DeliveryUser @relation(fields: [deliveryUserId], references: [id], onDelete: Restrict)
+
+  @@index([deliveryUserId, status])
+  @@map("delivery_assignment")
 }
 
 model OrderItem {
