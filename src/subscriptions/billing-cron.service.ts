@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { OrderStatus, PaymentStatus, Prisma, SubscriptionStatus } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { CronLockService } from '../common/locks/cron-lock.service';
+import { OutOfStockError } from '../inventory/inventory.errors';
 import { InventoryService } from '../inventory/inventory.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -15,10 +17,12 @@ export interface BillingRunResult {
   renewed: number;
   outOfStock: number;
   chargeFailed: number;
+  refunded: number;
+  skipped: number;
   errored: number;
 }
 
-type Outcome = 'renewed' | 'outOfStock' | 'chargeFailed';
+type Outcome = 'renewed' | 'outOfStock' | 'chargeFailed' | 'refunded' | 'skipped';
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -27,12 +31,18 @@ const ymd = (d: Date) => d.toISOString().slice(0, 10);
  * subscription whose billing date has come:
  *   1. Short stock, or a variant no longer sold: nothing is charged and
  *      `subscription.stockDelayed` is emitted.
- *   2. The stored token is charged the discounted price plus shipping. A
- *      decline creates no order and takes no stock; a FAILED payment row
- *      records the attempt (SDS §7.5) and `subscription.chargeFailed` is
- *      emitted.
- *   3. Paid: one transaction takes the stock FIFO and creates the PAID order
- *      and its PAID payment row, then `subscription.renewed` is emitted.
+ *   2. The cycle is claimed by a payment row with a unique
+ *      `<subscription>:<billing date>` key before any money moves, so a
+ *      restarted or concurrent run never charges the same cycle twice.
+ *   3. The stored token is charged the discounted price plus shipping, with
+ *      the same key as the gateway idempotency key. A decline creates no
+ *      order and takes no stock; the payment row records it as FAILED
+ *      (SDS §7.5) and `subscription.chargeFailed` is emitted.
+ *   4. Paid: one transaction takes the stock FIFO and creates the PAID
+ *      order, then `subscription.renewed` is emitted. If that transaction
+ *      fails, for example because a checkout took the last unit, the charge
+ *      is refunded, the payment row records both, and the customer gets the
+ *      stock-delayed notice.
  * Whatever the outcome, the billing date moves one interval forward from its
  * previous value, so a late run keeps the customer's schedule. Each
  * subscription is isolated, so one failure never stops the run.
@@ -48,11 +58,13 @@ export class BillingCronService {
     private readonly payments: PaymentsService,
     private readonly notifications: NotificationsService,
     private readonly cipher: TokenCipherService,
+    private readonly locks: CronLockService,
   ) {}
 
+  /** Only the instance that takes today's lock bills; the others skip. */
   @Cron(CronExpression.EVERY_DAY_AT_6AM)
-  async runDaily(): Promise<BillingRunResult> {
-    return this.runBilling();
+  async runDaily(): Promise<BillingRunResult | null> {
+    return this.locks.runExclusive(CronLockService.daily('billing'), 3600, () => this.runBilling());
   }
 
   /** The scheduled run, callable directly from tests. */
@@ -68,11 +80,13 @@ export class BillingCronService {
       renewed: 0,
       outOfStock: 0,
       chargeFailed: 0,
+      refunded: 0,
+      skipped: 0,
       errored: 0,
     };
     for (const sub of due) {
       try {
-        result[await this.processOne(sub.id)]++;
+        result[await this.processOne(sub.id, sub.nextBillingDate)]++;
       } catch (e) {
         result.errored++;
         this.logger.error(`Billing failed for subscription=${sub.id}: ${(e as Error).message}`);
@@ -88,16 +102,24 @@ export class BillingCronService {
     }
 
     this.logger.log(
-      `Billing run: due=${result.due} renewed=${result.renewed} outOfStock=${result.outOfStock} chargeFailed=${result.chargeFailed} errored=${result.errored}`,
+      `Billing run: due=${result.due} renewed=${result.renewed} outOfStock=${result.outOfStock} chargeFailed=${result.chargeFailed} refunded=${result.refunded} skipped=${result.skipped} errored=${result.errored}`,
     );
     return result;
   }
 
-  private async processOne(subscriptionId: string): Promise<Outcome> {
+  private async processOne(subscriptionId: string, selectedDate: Date): Promise<Outcome> {
     const sub = await this.prisma.subscription.findUniqueOrThrow({
       where: { id: subscriptionId },
       include: { variant: { select: { price: true, unitWeightGrams: true, active: true } } },
     });
+    // Another run may have billed it and moved the date on since it was selected;
+    // billing the new date now would charge the next cycle early
+    if (
+      sub.status !== SubscriptionStatus.ACTIVE ||
+      sub.nextBillingDate.getTime() !== selectedDate.getTime()
+    ) {
+      return 'skipped';
+    }
     const cycleDate = sub.nextBillingDate;
     const nextDate = addDaysUtc(cycleDate, sub.frequencyDays);
 
@@ -124,27 +146,48 @@ export class BillingCronService {
       { unitWeightGrams: sub.variant.unitWeightGrams, quantity: sub.quantity },
     ]);
     const total = unitPrice.mul(sub.quantity).plus(quote.feeLkr);
+    const cycleKey = `${sub.id}:${ymd(cycleDate)}`;
 
+    // Claim the cycle. A unique violation means another run already has it.
     const paymentId = randomUUID();
+    try {
+      await this.prisma.payment.create({
+        data: {
+          id: paymentId,
+          subscriptionId: sub.id,
+          gateway: sub.paymentGateway,
+          gatewayPaymentId: `cycle_${cycleKey}`,
+          billingCycleKey: cycleKey,
+          amount: total,
+          currency: 'LKR',
+          status: PaymentStatus.PENDING,
+        },
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        this.logger.warn(`Cycle ${cycleKey} is already billed; not charging again`);
+        await this.advance(sub.id, cycleDate, nextDate);
+        return 'skipped';
+      }
+      throw e;
+    }
+
     const charge = await this.payments.chargeStoredToken({
       paymentId,
       gateway: sub.paymentGateway,
       token: await this.cipher.decrypt(sub.paymentTokenEncrypted),
       amount: total.toFixed(2),
       currency: 'LKR',
-      idempotencyKey: `${sub.id}:${ymd(cycleDate)}`,
+      idempotencyKey: cycleKey,
       description: `Bio Bloom Subscribe & Save ${ymd(cycleDate)}`,
     });
+    const gatewayPaymentId = charge.gatewayPaymentId ?? `charge_${paymentId}`;
     if (!charge.succeeded) {
       const reason = charge.failureReason ?? 'declined';
-      await this.prisma.payment.create({
+      await this.prisma.payment.update({
+        where: { id: paymentId },
         data: {
-          id: paymentId,
-          subscriptionId: sub.id,
-          gateway: sub.paymentGateway,
-          gatewayPaymentId: charge.gatewayPaymentId ?? `declined_${paymentId}`,
-          amount: total,
-          currency: 'LKR',
+          gatewayPaymentId,
           status: PaymentStatus.FAILED,
           rawPayload: { failureReason: reason },
           processedAt: new Date(),
@@ -159,53 +202,89 @@ export class BillingCronService {
       return 'chargeFailed';
     }
 
-    const orderId = await this.prisma.$transaction(async (tx) => {
-      const draws = await this.inventory.decrementForVariant(
-        sub.productVariantId,
-        sub.quantity,
-        tx,
-      );
-      const order = await tx.order.create({
-        data: {
-          customerId: sub.customerId,
-          shippingAddressId: sub.shippingAddressId,
-          status: OrderStatus.PAID,
-          paymentStatus: PaymentStatus.PAID,
-          totalAmount: total,
-          totalWeight: quote.totalWeightG.toFixed(2),
-          shippingFee: quote.feeLkr,
-          currency: 'LKR',
-          notes: `Subscribe & Save renewal for ${ymd(cycleDate)}`,
-          items: {
-            create: draws.map((draw) => ({
-              productVariantId: sub.productVariantId,
-              batchId: draw.batchId,
-              quantity: draw.qtyTaken,
-              unitPriceSnapshot: unitPrice,
-              lineTotal: unitPrice.mul(draw.qtyTaken),
-            })),
+    let orderId: string;
+    try {
+      orderId = await this.prisma.$transaction(async (tx) => {
+        const draws = await this.inventory.decrementForVariant(
+          sub.productVariantId,
+          sub.quantity,
+          tx,
+        );
+        const order = await tx.order.create({
+          data: {
+            customerId: sub.customerId,
+            shippingAddressId: sub.shippingAddressId,
+            status: OrderStatus.PAID,
+            paymentStatus: PaymentStatus.PAID,
+            totalAmount: total,
+            totalWeight: quote.totalWeightG.toFixed(2),
+            shippingFee: quote.feeLkr,
+            currency: 'LKR',
+            notes: `Subscribe & Save renewal for ${ymd(cycleDate)}`,
+            items: {
+              create: draws.map((draw) => ({
+                productVariantId: sub.productVariantId,
+                batchId: draw.batchId,
+                quantity: draw.qtyTaken,
+                unitPriceSnapshot: unitPrice,
+                lineTotal: unitPrice.mul(draw.qtyTaken),
+              })),
+            },
           },
-        },
+        });
+        await tx.payment.update({
+          where: { id: paymentId },
+          data: {
+            orderId: order.id,
+            gatewayPaymentId,
+            status: PaymentStatus.PAID,
+            processedAt: new Date(),
+          },
+        });
+        await tx.subscription.updateMany({
+          where: { id: sub.id, nextBillingDate: cycleDate },
+          data: { nextBillingDate: nextDate },
+        });
+        return order.id;
       });
-      await tx.payment.create({
+    } catch (e) {
+      // Charged but no order: give the money back
+      const reason = (e as Error).message;
+      const refund = await this.payments.refundCharge({
+        gatewayPaymentId,
+        amount: total.toFixed(2),
+        currency: 'LKR',
+        gateway: sub.paymentGateway,
+      });
+      if (!refund.succeeded) {
+        this.logger.error(
+          `Refund of ${gatewayPaymentId} for cycle ${cycleKey} failed: ${refund.failureReason}`,
+        );
+      }
+      await this.prisma.payment.update({
+        where: { id: paymentId },
         data: {
-          id: paymentId,
-          orderId: order.id,
-          subscriptionId: sub.id,
-          gateway: sub.paymentGateway,
-          gatewayPaymentId: charge.gatewayPaymentId ?? `charge_${paymentId}`,
-          amount: total,
-          currency: 'LKR',
-          status: PaymentStatus.PAID,
+          gatewayPaymentId,
+          // PAID with a failed refund leaves the row for a manual refund
+          status: refund.succeeded ? PaymentStatus.REFUNDED : PaymentStatus.PAID,
+          rawPayload: {
+            failureReason: reason,
+            refundId: refund.refundId || null,
+            refundFailureReason: refund.failureReason ?? null,
+          },
           processedAt: new Date(),
         },
       });
-      await tx.subscription.updateMany({
-        where: { id: sub.id, nextBillingDate: cycleDate },
-        data: { nextBillingDate: nextDate },
+      this.notifications.emitSubscriptionStockDelayed({
+        subscriptionId: sub.id,
+        customerId: sub.customerId,
+        productVariantId: sub.productVariantId,
+        requested: sub.quantity,
+        available: e instanceof OutOfStockError ? e.available : 0,
       });
-      return order.id;
-    });
+      await this.advance(sub.id, cycleDate, nextDate);
+      return 'refunded';
+    }
 
     this.notifications.emitSubscriptionRenewed({
       subscriptionId: sub.id,

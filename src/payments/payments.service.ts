@@ -185,7 +185,7 @@ export class PaymentsService {
   }
 
   private async applyWebhookEvent(event: VerifiedPaymentEvent): Promise<{
-    status: 'applied' | 'duplicate';
+    status: 'applied' | 'duplicate' | 'refunded';
     orderId: string;
     paymentStatus: PaymentStatus;
   }> {
@@ -205,6 +205,27 @@ export class PaymentsService {
       const payment = await tx.payment.findUnique({ where: { id: found.id } });
       if (!payment) {
         throw new NotFoundException(`Payment ${found.id} not found`);
+      }
+      // A payment that succeeds after its order was cancelled, for example by
+      // the stale-order job, is refunded instead of reopening the order
+      if (
+        event.type === 'payment_succeeded' &&
+        payment.orderId &&
+        payment.status !== PaymentStatus.PAID &&
+        payment.status !== PaymentStatus.REFUNDED
+      ) {
+        const order = await tx.order.findUnique({
+          where: { id: payment.orderId },
+          select: { status: true },
+        });
+        if (order?.status === OrderStatus.CANCELLED) {
+          return {
+            status: 'refund' as const,
+            orderId: payment.orderId,
+            paymentStatus: payment.status,
+            payment,
+          };
+        }
       }
       if (payment.status !== PaymentStatus.PENDING) {
         return {
@@ -273,6 +294,10 @@ export class PaymentsService {
       };
     });
 
+    if (result.status === 'refund') {
+      return this.refundLatePayment(event, result.payment);
+    }
+
     if (
       result.status === 'applied' &&
       result.paymentStatus === PaymentStatus.PAID &&
@@ -284,6 +309,42 @@ export class PaymentsService {
       `Webhook ${result.status}: ${event.gatewayPaymentId} -> ${result.paymentStatus} (order ${result.orderId})`,
     );
     return result;
+  }
+
+  private async refundLatePayment(
+    event: VerifiedPaymentEvent,
+    payment: { id: string; orderId: string | null; amount: Prisma.Decimal; currency: string },
+  ): Promise<{ status: 'refunded'; orderId: string; paymentStatus: PaymentStatus }> {
+    const refund = await this.refundCharge({
+      gatewayPaymentId: event.gatewayPaymentId,
+      amount: payment.amount.toFixed(2),
+      currency: payment.currency,
+      gateway: event.gateway,
+    });
+    // PAID with a failed refund leaves the row for a manual refund
+    const paymentStatus = refund.succeeded ? PaymentStatus.REFUNDED : PaymentStatus.PAID;
+    await this.prisma.payment.update({
+      where: { id: payment.id },
+      data: {
+        status: paymentStatus,
+        processedAt: new Date(),
+        rawPayload: {
+          lateSuccess: JSON.parse(JSON.stringify(event.rawPayload)) as Prisma.InputJsonValue,
+          refundId: refund.refundId || null,
+          refundFailureReason: refund.failureReason ?? null,
+        },
+      },
+    });
+    if (refund.succeeded) {
+      this.logger.warn(
+        `Refunded ${event.gatewayPaymentId}: paid after order ${payment.orderId} was cancelled`,
+      );
+    } else {
+      this.logger.error(
+        `Refund of ${event.gatewayPaymentId} for cancelled order ${payment.orderId} failed: ${refund.failureReason}`,
+      );
+    }
+    return { status: 'refunded', orderId: payment.orderId ?? '', paymentStatus };
   }
 }
 

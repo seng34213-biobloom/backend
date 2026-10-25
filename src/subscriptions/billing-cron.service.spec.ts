@@ -1,4 +1,6 @@
 import { PaymentGateway, PaymentStatus, Prisma, SubscriptionStatus } from '@prisma/client';
+import { CronLockService } from '../common/locks/cron-lock.service';
+import { OutOfStockError } from '../inventory/inventory.errors';
 import { InventoryService } from '../inventory/inventory.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -14,23 +16,24 @@ describe('BillingCronService', () => {
   let svc: BillingCronService;
   let prisma: {
     subscription: { findMany: jest.Mock; findUniqueOrThrow: jest.Mock; updateMany: jest.Mock };
-    payment: { create: jest.Mock };
+    payment: { create: jest.Mock; update: jest.Mock };
     $transaction: jest.Mock;
   };
   let tx: {
     order: { create: jest.Mock };
-    payment: { create: jest.Mock };
+    payment: { update: jest.Mock };
     subscription: { updateMany: jest.Mock };
   };
   let inventory: { availableStock: jest.Mock; decrementForVariant: jest.Mock };
   let shipping: { calculate: jest.Mock };
-  let payments: { chargeStoredToken: jest.Mock };
+  let payments: { chargeStoredToken: jest.Mock; refundCharge: jest.Mock };
   let notifications: {
     emitSubscriptionRenewed: jest.Mock;
     emitSubscriptionStockDelayed: jest.Mock;
     emitSubscriptionChargeFailed: jest.Mock;
   };
   let cipher: { decrypt: jest.Mock };
+  let locks: { runExclusive: jest.Mock };
 
   const subscription = (overrides: Record<string, unknown> = {}) => ({
     id: 'sub-1',
@@ -51,7 +54,7 @@ describe('BillingCronService', () => {
   beforeEach(() => {
     tx = {
       order: { create: jest.fn().mockResolvedValue({ id: 'order-1' }) },
-      payment: { create: jest.fn().mockResolvedValue({}) },
+      payment: { update: jest.fn().mockResolvedValue({}) },
       subscription: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     };
     prisma = {
@@ -62,7 +65,10 @@ describe('BillingCronService', () => {
         findUniqueOrThrow: jest.fn().mockResolvedValue(subscription()),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
-      payment: { create: jest.fn().mockResolvedValue({}) },
+      payment: {
+        create: jest.fn().mockResolvedValue({}),
+        update: jest.fn().mockResolvedValue({}),
+      },
       $transaction: jest.fn((callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
     };
     inventory = {
@@ -82,6 +88,7 @@ describe('BillingCronService', () => {
     };
     payments = {
       chargeStoredToken: jest.fn().mockResolvedValue({ succeeded: true, gatewayPaymentId: 'pi_1' }),
+      refundCharge: jest.fn().mockResolvedValue({ succeeded: true, refundId: 're_1' }),
     };
     notifications = {
       emitSubscriptionRenewed: jest.fn(),
@@ -89,6 +96,9 @@ describe('BillingCronService', () => {
       emitSubscriptionChargeFailed: jest.fn(),
     };
     cipher = { decrypt: jest.fn().mockResolvedValue('cus_1:pm_1') };
+    locks = {
+      runExclusive: jest.fn((_name: string, _ttl: number, fn: () => Promise<unknown>) => fn()),
+    };
 
     svc = new BillingCronService(
       prisma as unknown as PrismaService,
@@ -97,6 +107,7 @@ describe('BillingCronService', () => {
       payments as unknown as PaymentsService,
       notifications as unknown as NotificationsService,
       cipher as unknown as TokenCipherService,
+      locks as unknown as CronLockService,
     );
   });
 
@@ -108,6 +119,8 @@ describe('BillingCronService', () => {
       renewed: 0,
       outOfStock: 0,
       chargeFailed: 0,
+      refunded: 0,
+      skipped: 0,
       errored: 0,
     });
     expect(prisma.subscription.findMany).toHaveBeenCalledWith(
@@ -150,10 +163,20 @@ describe('BillingCronService', () => {
       ['batch-1', '900.00'],
       ['batch-2', '900.00'],
     ]);
-    expect(tx.payment.create).toHaveBeenCalledWith({
+    expect(prisma.payment.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        subscriptionId: 'sub-1',
+        billingCycleKey: 'sub-1:2026-10-30',
+        status: PaymentStatus.PENDING,
+      }),
+    });
+    expect(prisma.payment.create.mock.invocationCallOrder[0]).toBeLessThan(
+      payments.chargeStoredToken.mock.invocationCallOrder[0],
+    );
+    expect(tx.payment.update).toHaveBeenCalledWith({
+      where: { id: expect.any(String) },
       data: expect.objectContaining({
         orderId: 'order-1',
-        subscriptionId: 'sub-1',
         gatewayPaymentId: 'pi_1',
         status: PaymentStatus.PAID,
       }),
@@ -217,9 +240,9 @@ describe('BillingCronService', () => {
     await expect(svc.runBilling(today)).resolves.toMatchObject({ chargeFailed: 1, renewed: 0 });
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(inventory.decrementForVariant).not.toHaveBeenCalled();
-    expect(prisma.payment.create).toHaveBeenCalledWith({
+    expect(prisma.payment.update).toHaveBeenCalledWith({
+      where: { id: expect.any(String) },
       data: expect.objectContaining({
-        subscriptionId: 'sub-1',
         gatewayPaymentId: 'pi_declined',
         status: PaymentStatus.FAILED,
         rawPayload: { failureReason: 'insufficient_funds' },
@@ -231,6 +254,89 @@ describe('BillingCronService', () => {
       reason: 'insufficient_funds',
     });
     expect(prisma.subscription.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips a subscription another run already billed and moved on', async () => {
+    prisma.subscription.findUniqueOrThrow.mockResolvedValue(
+      subscription({ nextBillingDate: new Date('2026-11-29T00:00:00.000Z') }),
+    );
+
+    await expect(svc.runBilling(today)).resolves.toMatchObject({ skipped: 1, renewed: 0 });
+    expect(prisma.payment.create).not.toHaveBeenCalled();
+    expect(payments.chargeStoredToken).not.toHaveBeenCalled();
+    expect(prisma.subscription.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('skips a subscription that was paused after it was selected', async () => {
+    prisma.subscription.findUniqueOrThrow.mockResolvedValue(
+      subscription({ status: SubscriptionStatus.PAUSED }),
+    );
+
+    await expect(svc.runBilling(today)).resolves.toMatchObject({ skipped: 1 });
+    expect(payments.chargeStoredToken).not.toHaveBeenCalled();
+  });
+
+  it('does not charge a cycle that another run already claimed', async () => {
+    prisma.payment.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: 'test',
+      }),
+    );
+
+    await expect(svc.runBilling(today)).resolves.toMatchObject({ skipped: 1, renewed: 0 });
+    expect(payments.chargeStoredToken).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.subscription.updateMany).toHaveBeenCalledWith({
+      where: { id: 'sub-1', nextBillingDate: dueDate },
+      data: { nextBillingDate: new Date('2026-11-29T00:00:00.000Z') },
+    });
+  });
+
+  it('refunds the charge when the stock transaction fails after payment', async () => {
+    inventory.decrementForVariant.mockRejectedValue(new OutOfStockError('var-1', 2, 1));
+
+    await expect(svc.runBilling(today)).resolves.toMatchObject({ refunded: 1, renewed: 0 });
+    expect(payments.refundCharge).toHaveBeenCalledWith({
+      gatewayPaymentId: 'pi_1',
+      amount: '2300.00',
+      currency: 'LKR',
+      gateway: PaymentGateway.STRIPE,
+    });
+    expect(prisma.payment.update).toHaveBeenCalledWith({
+      where: { id: expect.any(String) },
+      data: expect.objectContaining({
+        gatewayPaymentId: 'pi_1',
+        status: PaymentStatus.REFUNDED,
+        rawPayload: expect.objectContaining({ refundId: 're_1' }),
+      }),
+    });
+    expect(notifications.emitSubscriptionStockDelayed).toHaveBeenCalledWith(
+      expect.objectContaining({ subscriptionId: 'sub-1', requested: 2, available: 1 }),
+    );
+    expect(notifications.emitSubscriptionRenewed).not.toHaveBeenCalled();
+    expect(prisma.subscription.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the payment PAID for a manual refund when the gateway refund fails', async () => {
+    tx.order.create.mockRejectedValue(new Error('connection reset'));
+    payments.refundCharge.mockResolvedValue({
+      succeeded: false,
+      refundId: '',
+      failureReason: 'gateway_refund_declined',
+    });
+
+    await expect(svc.runBilling(today)).resolves.toMatchObject({ refunded: 1 });
+    expect(prisma.payment.update).toHaveBeenCalledWith({
+      where: { id: expect.any(String) },
+      data: expect.objectContaining({
+        status: PaymentStatus.PAID,
+        rawPayload: expect.objectContaining({
+          failureReason: 'connection reset',
+          refundFailureReason: 'gateway_refund_declined',
+        }),
+      }),
+    });
   });
 
   it('keeps going after one subscription fails, and still advances the failed one', async () => {
@@ -253,17 +359,31 @@ describe('BillingCronService', () => {
     });
   });
 
-  it('bills from the start of today when the schedule fires', async () => {
+  it('bills from the start of today under the daily billing lock', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-11-01T06:00:00.000Z'));
     try {
       await svc.runDaily();
     } finally {
       jest.useRealTimers();
     }
+    expect(locks.runExclusive).toHaveBeenCalledWith(
+      'billing:2026-11-01',
+      3600,
+      expect.any(Function),
+    );
     expect(prisma.subscription.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { status: SubscriptionStatus.ACTIVE, nextBillingDate: { lte: today } },
       }),
     );
+  });
+
+  it('charges nothing and creates no order when another instance holds the lock', async () => {
+    locks.runExclusive.mockResolvedValue(null);
+
+    await expect(svc.runDaily()).resolves.toBeNull();
+    expect(prisma.subscription.findMany).not.toHaveBeenCalled();
+    expect(payments.chargeStoredToken).not.toHaveBeenCalled();
+    expect(tx.order.create).not.toHaveBeenCalled();
   });
 });

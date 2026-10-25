@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BatchStatus } from '@prisma/client';
+import { CronLockService } from '../common/locks/cron-lock.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface BatchExpiringSoonPayload {
@@ -44,11 +45,13 @@ export class ExpiryCronService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: EventEmitter2,
+    private readonly locks: CronLockService,
   ) {}
 
+  /** Only the instance that takes today's lock sweeps, so admins get one email. */
   @Cron(CronExpression.EVERY_DAY_AT_6AM)
-  async runDaily(): Promise<{ expiredCount: number; expiringSoonCount: number }> {
-    return this.sweep();
+  async runDaily(): Promise<{ expiredCount: number; expiringSoonCount: number } | null> {
+    return this.locks.runExclusive(CronLockService.daily('expiry'), 3600, () => this.sweep());
   }
 
   /** Pure logic separated so tests (and a future admin trigger) can run it directly. */
