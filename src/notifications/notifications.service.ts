@@ -41,6 +41,7 @@ export const DOMAIN_EVENTS = {
   /** Raised by the daily expiry sweep (batches/expiry-cron.service.ts). */
   BATCH_EXPIRING_SOON: 'batch.expiringSoon',
   BATCH_EXPIRED: 'batch.expired',
+  DELIVERY_ASSIGNED: 'delivery.assigned',
 } as const;
 export type DomainEvent = (typeof DOMAIN_EVENTS)[keyof typeof DOMAIN_EVENTS];
 
@@ -122,6 +123,11 @@ export interface BatchExpiredPayload {
   batchNumber: string;
   expiryDate: Date | string;
   currentQuantity: number;
+}
+export interface DeliveryAssignedPayload {
+  assignmentId: string;
+  orderId: string;
+  deliveryUserId: string;
 }
 
 interface OrderContext {
@@ -284,6 +290,11 @@ export class NotificationsService implements OnModuleInit {
         daysUntilExpiry: p.daysUntilExpiry,
       });
     });
+    this.on(DOMAIN_EVENTS.DELIVERY_ASSIGNED, async (p: DeliveryAssignedPayload) => {
+      this.logger.log(
+        `delivery.assigned assignment=${p.assignmentId} order=${p.orderId} rider=${p.deliveryUserId}`,
+      );
+    });
   }
 
   // ===== emit helpers =======================================================
@@ -329,6 +340,9 @@ export class NotificationsService implements OnModuleInit {
   }
   emitBatchExpired(p: BatchExpiredPayload): void {
     this.emitter.emit(DOMAIN_EVENTS.BATCH_EXPIRED, p);
+  }
+  emitDeliveryAssigned(p: DeliveryAssignedPayload): void {
+    this.emitter.emit(DOMAIN_EVENTS.DELIVERY_ASSIGNED, p);
   }
 
   // ===== helpers ============================================================

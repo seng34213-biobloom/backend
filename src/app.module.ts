@@ -15,6 +15,7 @@ import { CartModule } from './cart/cart.module';
 import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
 import { CsrfMiddleware } from './common/middleware/csrf.middleware';
 import { validateEnvironment } from './config/env.validation';
+import { DeliveryModule } from './delivery/delivery.module';
 import { HealthModule } from './health/health.module';
 import { FulfilmentModule } from './fulfilment/fulfilment.module';
 import { InventoryModule } from './inventory/inventory.module';
@@ -67,6 +68,7 @@ const AUTH_THROTTLE_KEY = 'THROTTLER:LIMITauth';
     ProductsModule,
     BatchesModule,
     CartModule,
+    DeliveryModule,
     ShippingModule,
     OrdersModule,
     AnalyticsModule,
