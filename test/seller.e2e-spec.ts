@@ -1,6 +1,7 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { ThrottlerModule } from '@nestjs/throttler';
+import * as bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
@@ -24,8 +25,8 @@ describe('Seller flow (e2e)', () => {
   const sellerEmailB = `apply-b-${stamp}@bbtest.lk`;
   const sellerPassword = 'Password123!';
 
-  // The seed creates this admin with the same password.
-  const adminEmail = 'admin@biobloom.lk';
+  // Created in beforeAll: CI runs against an empty database, without a seed.
+  const adminEmail = `admin-${stamp}@bbtest.lk`;
   const adminPassword = 'Password123!';
 
   beforeAll(async () => {
@@ -51,6 +52,14 @@ describe('Seller flow (e2e)', () => {
     );
     await app.init();
     prisma = app.get(PrismaService);
+    await prisma.adminUser.create({
+      data: {
+        email: adminEmail,
+        passwordHash: await bcrypt.hash(adminPassword, 4),
+        name: 'Seller flow admin',
+        role: 'ADMIN',
+      },
+    });
   });
 
   afterAll(async () => {
@@ -64,6 +73,7 @@ describe('Seller flow (e2e)', () => {
       await prisma.seller.deleteMany({
         where: { email: { in: [sellerEmailA, sellerEmailB] } },
       });
+      await prisma.adminUser.deleteMany({ where: { email: adminEmail } });
     }
     await app.close();
   });
