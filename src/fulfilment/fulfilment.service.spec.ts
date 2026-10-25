@@ -41,7 +41,7 @@ describe('FulfilmentService', () => {
   it('lists only paid and packing orders in oldest-first order', async () => {
     (prisma.order.findMany as jest.Mock).mockResolvedValue([]);
 
-    await service.listOpen();
+    await expect(service.listOpen()).resolves.toEqual([]);
 
     expect(prisma.order.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -49,6 +49,27 @@ describe('FulfilmentService', () => {
         orderBy: { placedAt: 'asc' },
       }),
     );
+  });
+
+  it('lists shipped orders newest-first', async () => {
+    (prisma.order.findMany as jest.Mock).mockResolvedValue([]);
+
+    await expect(service.listShipped()).resolves.toEqual([]);
+
+    expect(prisma.order.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { status: OrderStatus.SHIPPED },
+        orderBy: { shippedAt: 'desc' },
+      }),
+    );
+  });
+
+  it('transitions an order to packing without sending a customer email', async () => {
+    await service.markPacking('order-1', staff);
+
+    expect(orderStatus.transition).toHaveBeenCalledWith('order-1', OrderStatus.PACKING, staff);
+    expect(notifications.emitOrderShipped).not.toHaveBeenCalled();
+    expect(notifications.emitOrderDelivered).not.toHaveBeenCalled();
   });
 
   it('audits a ship transition and emits the customer notification', async () => {
@@ -59,5 +80,23 @@ describe('FulfilmentService', () => {
       orderId: 'order-1',
       actorId: staff.id,
     });
+  });
+
+  it('emits the delivery notification only after the transition succeeds', async () => {
+    await service.markDelivered('order-1', staff);
+
+    expect(orderStatus.transition).toHaveBeenCalledWith('order-1', OrderStatus.DELIVERED, staff);
+    expect(notifications.emitOrderDelivered).toHaveBeenCalledWith({
+      orderId: 'order-1',
+      actorId: staff.id,
+    });
+  });
+
+  it('does not emit a shipment email when the transition fails', async () => {
+    orderStatus.transition.mockRejectedValueOnce(new Error('Illegal transition'));
+
+    await expect(service.markShipped('order-1', staff)).rejects.toThrow('Illegal transition');
+
+    expect(notifications.emitOrderShipped).not.toHaveBeenCalled();
   });
 });

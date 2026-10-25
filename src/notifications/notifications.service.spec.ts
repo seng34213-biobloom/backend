@@ -387,6 +387,11 @@ describe('NotificationsService', () => {
       ['emitRefundRejected', DOMAIN_EVENTS.REFUND_REJECTED, { refundRequestId: 'r' }],
       ['emitBatchExpiringSoon', DOMAIN_EVENTS.BATCH_EXPIRING_SOON, { batchId: 'b' }],
       ['emitBatchExpired', DOMAIN_EVENTS.BATCH_EXPIRED, { batchId: 'b' }],
+      [
+        'emitDeliveryAssigned',
+        DOMAIN_EVENTS.DELIVERY_ASSIGNED,
+        { assignmentId: 'a', orderId: 'o', deliveryUserId: 'r' },
+      ],
     ];
 
     for (const [method, event, payload] of calls) {

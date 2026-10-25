@@ -13,6 +13,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
 import { BatchesModule } from './batches/batches.module';
 import { CartModule } from './cart/cart.module';
 import { CsrfMiddleware } from './common/middleware/csrf.middleware';
+import { DeliveryModule } from './delivery/delivery.module';
 import { HealthModule } from './health/health.module';
 import { FulfilmentModule } from './fulfilment/fulfilment.module';
 import { InventoryModule } from './inventory/inventory.module';
@@ -63,6 +64,7 @@ const AUTH_THROTTLE_KEY = 'THROTTLER:LIMITauth';
     ProductsModule,
     BatchesModule,
     CartModule,
+    DeliveryModule,
     ShippingModule,
     OrdersModule,
     AnalyticsModule,

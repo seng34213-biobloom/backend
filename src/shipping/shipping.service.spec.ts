@@ -49,7 +49,7 @@ describe('ShippingService', () => {
     expect(cache.set).toHaveBeenCalledWith('shipping:rates', expect.any(String), 'EX', 300);
   });
 
-  it('calculates the 1250 g total from multiple cart items', async () => {
+ it('calculates the 1250 g total from multiple cart items', async () => {
     await expect(
       service.calculate([
         { unitWeightGrams: 250, quantity: 2 },
@@ -64,15 +64,16 @@ describe('ShippingService', () => {
   });
 
   it.each([
-    [500, '350.00', '0-500 g'],
-    [501, '500.00', '501 g - 1 kg'],
-  ])('uses the correct inclusive rate at %d g', async (weight, fee, label) => {
+    [500, '350.00', '0-500 g', 'rate-1'],
+    [501, '500.00', '501 g - 1 kg', 'rate-2'],
+  ])('uses the correct inclusive rate at %d g boundary', async (weight, fee, label, bracketId) => {
     await expect(
       service.calculate([{ unitWeightGrams: weight, quantity: 1 }]),
     ).resolves.toMatchObject({
       totalWeightG: weight,
       feeLkr: fee,
       bracketLabel: label,
+      bracketId,
     });
   });
 
