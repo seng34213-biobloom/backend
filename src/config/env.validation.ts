@@ -16,8 +16,15 @@ const PRODUCTION_SECRETS: Record<string, number> = {
   SUBSCRIPTION_TOKEN_ENC_KEY: 16,
 };
 
+/**
+ * Production secret policy. APP_ENV=staging marks a production build that is
+ * not the live shop: it may use Stripe test keys, and the uploads bucket is
+ * optional (upload endpoints answer 503 until it is set). Every other check
+ * still applies.
+ */
 export function validateEnvironment<T extends Record<string, unknown>>(config: T): T {
   if (config.NODE_ENV !== 'production') return config;
+  const staging = config.APP_ENV === 'staging';
 
   const missing: string[] = [];
   const insecure: string[] = [];
@@ -30,14 +37,14 @@ export function validateEnvironment<T extends Record<string, unknown>>(config: T
     }
     if (
       value.length < minimumLength ||
-      (name === 'STRIPE_SECRET_KEY' && value.startsWith('sk_test_')) ||
+      (name === 'STRIPE_SECRET_KEY' && value.startsWith('sk_test_') && !staging) ||
       DEVELOPMENT_SECRET_MARKERS.some((marker) => value.toLowerCase().includes(marker))
     ) {
       insecure.push(name);
     }
   }
 
-  for (const name of ['AWS_REGION', 'UPLOADS_BUCKET']) {
+  for (const name of staging ? [] : ['AWS_REGION', 'UPLOADS_BUCKET']) {
     const value = config[name];
     if (typeof value !== 'string' || value.trim().length === 0) missingConfig.push(name);
   }
