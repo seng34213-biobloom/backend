@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Weight-bracket shipping quotes sum cart-item weights, apply inclusive rate boundaries, and cache rate brackets in Redis for five minutes (#16)
 - Verified-purchase product reviews with admin moderation and public approved-review summaries (#31)
 - Customer support tickets with customer reopen and admin resolution/closure workflows (#31)
 - Staging deploy: every push to `develop` that passes CI is deployed to Render, and the job waits until `/api/health` reports that commit (#49)
