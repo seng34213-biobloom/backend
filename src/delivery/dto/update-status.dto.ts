@@ -1,6 +1,15 @@
 import { Transform, Type } from 'class-transformer';
 import { DeliveryAssignmentStatus } from '@prisma/client';
-import { IsEnum, IsNumber, IsString, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import {
+  IsEnum,
+  IsNumber,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+  ValidateIf,
+} from 'class-validator';
 
 export class UpdateDeliveryStatusDto {
   @IsEnum(DeliveryAssignmentStatus)
@@ -22,7 +31,7 @@ export class UpdateDeliveryStatusDto {
 
   @ValidateIf((dto: UpdateDeliveryStatusDto) => dto.status === DeliveryAssignmentStatus.FAILED)
   @IsString()
-  @Min(1)
+  @MinLength(1)
   @MaxLength(500)
   @Transform(({ value }: { value: string }) => value?.trim())
   failureReason?: string;
