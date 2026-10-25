@@ -25,6 +25,7 @@ import { ReviewsModule } from './reviews/reviews.module';
 import { ShippingModule } from './shipping/shipping.module';
 import { RedisModule } from './redis/redis.module';
 import { RefundsModule } from './refunds/refunds.module';
+import { SellerModule } from './sellers/seller.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { SupportModule } from './support/support.module';
 
@@ -73,6 +74,7 @@ const AUTH_THROTTLE_KEY = 'THROTTLER:LIMITauth';
     ReviewsModule,
     SupportModule,
     SubscriptionsModule,
+    SellerModule,
     HealthModule,
     AuthModule,
   ],
