@@ -145,12 +145,25 @@ All routes are under `/api`. Invalid input returns `422 Unprocessable Entity`.
 
 Admins and sellers add stock with `POST /admin/products/:productId/variants/:variantId/batches` (`batchNumber`, `manufacturedDate`, `expiryDate`, `initialQuantity`). The manufactured date cannot be in the future and the expiry date must be tomorrow or later. Sellers can only manage batches of their own products; products without a seller are managed by admins. Every new batch writes a `batch.create` row to `audit_log`.
 
+## CI/CD pipeline
+
+`.github/workflows/ci.yml` runs on every pull request and every push to `develop` and `main` (SDS §8.2). Each stage runs only when the one before it passes:
+
+1. **Lint, build and test:** ESLint, the Prettier check, the build, unit tests with the 80% coverage gate (the report is uploaded as the `coverage` artefact), migrations, and the integration suite twice against PostgreSQL, Redis and MailHog.
+2. **Dependency audit:** `npm audit --audit-level=high` fails on any high or critical advisory.
+3. **Docker image:** builds the `Dockerfile`. Pushes to `develop` also publish it as `ghcr.io/seng34213-biobloom/backend:<commit sha>`; pull requests, forks included, only build it.
+4. **Deploy to Render staging:** pushes to `develop` only, described below.
+
+A newer push to the same branch or pull request cancels the older run.
+
+The image runs the compiled API as the non-root `node` user on port 4000, with a healthcheck on `/api/health`. It holds the migrations but not the Prisma CLI, so run `prisma migrate deploy` before starting a new version. No `.env` file is ever copied into it.
+
 ## Deployment
 
 Staging runs on Render in Singapore: the `biobloom-api` web service, Render Postgres 15 and Render Key Value.
 
 - API: https://biobloom-api.onrender.com/api
-- Every push to `develop` runs CI. When it passes, the `Deploy to Render staging` job deploys that commit through the `RENDER_DEPLOY_HOOK_URL` secret of the `staging` environment, then waits until `/api/health` reports that commit. The job fails if it does not within 15 minutes.
+- Every push to `develop` runs CI. When the tests, the audit and the image build pass, the `Deploy to Render staging` job deploys that commit through the `RENDER_DEPLOY_HOOK_URL` secret of the `staging` environment, then waits until `/api/health` reports that commit. The job fails if it does not within 15 minutes.
 - Auto-deploy is off on the Render service, so a commit that fails CI is never deployed.
 - Migrations run with `prisma migrate deploy` when the service starts. Render only switches traffic to the new version once `/api/health` responds, so a failed deploy leaves the previous one live.
 - Environment variables are set on the Render service, not in the repo. The names match `.env.example`.
