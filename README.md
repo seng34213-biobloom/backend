@@ -108,6 +108,20 @@ Subscriptions run every 14, 30 or 60 days for 1 to 10 units. Their status moves 
 
 Whatever the outcome, the billing date moves one interval forward from its previous value, so a late run keeps the schedule. One failing subscription never stops the run.
 
+Before charging, the run claims the cycle with a payment row whose `billing_cycle_key` (`<subscription id>:<billing date>`) is unique, and sends the same key to the gateway as the idempotency key. A restarted or overlapping run therefore never charges a cycle twice. If the stock transaction fails after a successful charge, for example because a checkout took the last unit, the charge is refunded, the payment row records both, and the customer gets the delivery-delayed email.
+
+## Scheduled jobs
+
+| Job                     | When             | What                                            |
+| ----------------------- | ---------------- | ----------------------------------------------- |
+| `BillingCronService`    | Daily, 06:00 UTC | Subscribe & Save billing, above                 |
+| `ExpiryCronService`     | Daily, 06:00 UTC | Batch expiry sweep, below                       |
+| `StaleOrderCronService` | Every 10 minutes | Cancels unpaid checkouts older than the timeout |
+
+With several API instances, each job runs on the instance that takes its Redis lock (`cron:billing:<date>`, `cron:expiry:<date>`, `cron:stale-orders:<slot>`); the others log that they skipped.
+
+Checkout takes stock when it creates a `PENDING_PAYMENT` order. If it is still unpaid after `PENDING_ORDER_TIMEOUT_MINUTES` (30 by default), `StaleOrderCronService` cancels it, marks its payment `FAILED`, returns the units to batches that have not expired and writes a `SYSTEM` audit entry. A payment that succeeds after its order was cancelled is refunded, not applied.
+
 Stripe tokens are stored as `<customer id>:<payment method id>` and charged off-session. PayHere tokens are charged through the Charging API with `PAYHERE_APP_ID` and `PAYHERE_APP_SECRET`. In tests no gateway is called: a token containing `fail` or `decline` is declined and any other token is approved.
 
 ## Batch expiry sweep

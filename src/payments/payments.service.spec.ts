@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { PaymentGateway, PaymentStatus, Prisma } from '@prisma/client';
+import { OrderStatus, PaymentGateway, PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PayHereGateway } from './gateways/payhere.gateway';
 import { StripeGateway, VerifiedPaymentEvent } from './gateways/stripe.gateway';
@@ -15,7 +15,7 @@ describe('PaymentsService', () => {
   let useRealGateways: boolean;
   let transaction: {
     payment: { findUnique: jest.Mock };
-    order: { update: jest.Mock };
+    order: { update: jest.Mock; findUnique: jest.Mock };
     orderItem: { findMany: jest.Mock };
     productBatch: { findUnique: jest.Mock; update: jest.Mock };
   };
@@ -37,7 +37,10 @@ describe('PaymentsService', () => {
         findUnique: jest.fn().mockResolvedValue(payment),
         update: jest.fn().mockResolvedValue(payment),
       },
-      order: { update: jest.fn().mockResolvedValue({}) },
+      order: {
+        update: jest.fn().mockResolvedValue({}),
+        findUnique: jest.fn().mockResolvedValue({ status: OrderStatus.PENDING_PAYMENT }),
+      },
       orderItem: { findMany: jest.fn().mockResolvedValue([]) },
       productBatch: {
         findUnique: jest.fn(),
@@ -47,7 +50,10 @@ describe('PaymentsService', () => {
     transaction = tx;
     useRealGateways = false;
     prisma = {
-      payment: { create: jest.fn().mockResolvedValue({ id: payment.id }) },
+      payment: {
+        create: jest.fn().mockResolvedValue({ id: payment.id }),
+        update: jest.fn().mockResolvedValue({}),
+      },
       order: { findUnique: jest.fn() },
       $transaction: jest.fn((callback: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
         callback(tx as unknown as Prisma.TransactionClient),
@@ -151,6 +157,39 @@ describe('PaymentsService', () => {
       paymentStatus: PaymentStatus.PAID,
     });
     expect(events.emit).toHaveBeenCalledWith('order.confirmed', { orderId: 'order-1' });
+  });
+
+  it('refunds a payment that succeeds after its order was cancelled', async () => {
+    const event: VerifiedPaymentEvent = {
+      gateway: PaymentGateway.STRIPE,
+      gatewayPaymentId: payment.gatewayPaymentId,
+      type: 'payment_succeeded',
+      amount: '1500',
+      currency: 'LKR',
+      rawPayload: { id: 'evt-late' },
+    };
+    stripe.parseWebhook.mockReturnValue(event);
+    transaction.payment.findUnique
+      .mockResolvedValueOnce(payment)
+      .mockResolvedValueOnce({ ...payment, status: PaymentStatus.FAILED });
+    transaction.order.findUnique.mockResolvedValue({ status: OrderStatus.CANCELLED });
+
+    const result = await service.handleStripeWebhook(Buffer.from('{}'), 'signature');
+
+    expect(result).toEqual({
+      status: 'refunded',
+      orderId: 'order-1',
+      paymentStatus: PaymentStatus.REFUNDED,
+    });
+    expect(transaction.order.update).not.toHaveBeenCalled();
+    expect(prisma.payment.update).toHaveBeenCalledWith({
+      where: { id: payment.id },
+      data: expect.objectContaining({
+        status: PaymentStatus.REFUNDED,
+        rawPayload: expect.objectContaining({ refundId: expect.stringMatching(/^re_test_/) }),
+      }),
+    });
+    expect(events.emit).not.toHaveBeenCalled();
   });
 
   it('does not apply a repeated webhook event', async () => {

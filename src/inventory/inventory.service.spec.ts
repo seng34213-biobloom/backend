@@ -219,7 +219,7 @@ describe('InventoryService', () => {
       expect(prisma.productBatch.update).toHaveBeenCalledTimes(1);
       expect(prisma.productBatch.update).toHaveBeenCalledWith({
         where: { id: 'fresh' },
-        data: { currentQuantity: 5, status: 'ACTIVE' },
+        data: { currentQuantity: { increment: 2 }, status: 'ACTIVE' },
       });
     });
   });

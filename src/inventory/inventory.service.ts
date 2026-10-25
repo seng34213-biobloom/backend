@@ -159,14 +159,12 @@ export class InventoryService {
         continue;
       }
 
-      const restored = batch.currentQuantity + item.quantity;
+      // Increment in SQL, so a checkout taking from the same batch meanwhile is not overwritten
       await tx.productBatch.update({
         where: { id: batch.id },
         data: {
-          currentQuantity: restored,
-          ...(batch.status === BatchStatus.DEPLETED && restored > 0
-            ? { status: BatchStatus.ACTIVE }
-            : {}),
+          currentQuantity: { increment: item.quantity },
+          ...(batch.status === BatchStatus.DEPLETED ? { status: BatchStatus.ACTIVE } : {}),
         },
       });
       results.push({ batchId: batch.id, quantity: item.quantity, restocked: true });

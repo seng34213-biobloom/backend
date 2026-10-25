@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Unpaid checkouts are cancelled after `PENDING_ORDER_TIMEOUT_MINUTES` (30 by default): the payment fails, the units go back to unexpired batches and a SYSTEM audit entry is written; a payment that succeeds after its order was cancelled is refunded (#64)
 - Daily Subscribe & Save billing at 06:00 UTC: each due active subscription is charged the discounted price plus shipping on its stored token, and a paid renewal becomes a `PAID` order with FIFO stock; short stock or a declined charge creates no order and takes no stock, and the billing date always moves one interval forward (#15)
 - `PaymentsService.chargeStoredToken` for off-session Stripe charges and the PayHere Charging API (#15)
 - Production environment validation for signing, payment, token-encryption, and upload configuration; user-based API throttling, CSP headers, verified private proof-image uploads, and customer ownership coverage (#37)
@@ -41,6 +42,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Billing and the expiry sweep run on one API instance only, under a daily Redis lock; each billing cycle is claimed once with a unique key, and a renewal whose stock transaction fails after the charge is refunded (#64)
+- Restocking a cancelled or refunded order increments the batch in SQL, so a concurrent checkout's decrement is no longer overwritten (#64)
 - The auth rate limit of 20 requests per 15 minutes now applies only to register and login. It had applied to every route, so `/api/health` failed Render's health checks and staging kept restarting (#55)
 - `GET /api/products` and `GET /api/products/:slug` now return the `seller` (`id`, `businessName`), or `null` for admin-managed products; the storefront product pages failed without it (#55)
 - Restored a single notifications module after the payment webhooks merge left duplicate mailer, listener and template code that stopped `develop` from building (#43)
