@@ -184,6 +184,21 @@ describe('OrdersService', () => {
     expect(tx.order.create).not.toHaveBeenCalled();
   });
 
+  it('does not create an order when no shipping rate covers the cart weight', async () => {
+    shipping.calculate.mockRejectedValue(
+      new NotFoundException('No shipping rate covers weight 2001 g'),
+    );
+
+    await expect(service.checkout('customer-1', 'address-1')).rejects.toThrow(
+      'No shipping rate covers weight 2001 g',
+    );
+
+    expect(tx.order.create).not.toHaveBeenCalled();
+    expect(tx.cartItem.deleteMany).not.toHaveBeenCalled();
+    expect(inventory.decrementForVariant).not.toHaveBeenCalled();
+    expect(payments.createIntent).not.toHaveBeenCalled();
+  });
+
   it('does not create an order, clear the cart, or charge when FIFO stock loses a race', async () => {
     inventory.decrementForVariant.mockRejectedValue(new OutOfStockError('variant-1', 2, 0));
 
