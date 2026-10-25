@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Daily Subscribe & Save billing at 06:00 UTC: each due active subscription is charged the discounted price plus shipping on its stored token, and a paid renewal becomes a `PAID` order with FIFO stock; short stock or a declined charge creates no order and takes no stock, and the billing date always moves one interval forward (#15)
+- `PaymentsService.chargeStoredToken` for off-session Stripe charges and the PayHere Charging API (#15)
 - CI/CD pipeline stages: unit tests with the coverage gate and an uploaded report, a dependency audit that fails on high or critical advisories, and a multi-stage Docker image that every push to `develop` publishes to GitHub Container Registry tagged with the commit SHA; staging deploys only after all of them pass, and a newer push cancels the older run (#62)
 - Production environment validation for signing, payment, token-encryption, and upload configuration; user-based API throttling, CSP headers, verified private proof-image uploads, and customer ownership coverage (#37)
 - Weight-bracket shipping quotes sum cart-item weights, apply inclusive rate boundaries, and cache rate brackets in Redis for five minutes (#16)

@@ -15,6 +15,8 @@ describe('PayHereGateway', () => {
         PAYHERE_RETURN_URL: 'https://shop.example/return',
         PAYHERE_CANCEL_URL: 'https://shop.example/cancel',
         PAYHERE_NOTIFY_URL: 'https://api.example/api/webhooks/payhere',
+        PAYHERE_APP_ID: 'app-id',
+        PAYHERE_APP_SECRET: 'app-secret',
       };
       return values[key];
     }),
@@ -115,5 +117,81 @@ describe('PayHereGateway', () => {
       .toUpperCase();
 
     expect(gateway.parseWebhook({ ...input, md5sig }).type).toBe('payment_failed');
+  });
+
+  describe('chargeStoredToken', () => {
+    const request = {
+      paymentId: 'payment-1',
+      token: 'customer-token-123',
+      amount: '2050',
+      currency: 'LKR',
+      idempotencyKey: 'sub-1:2026-11-01',
+      description: 'Bio Bloom Subscribe & Save 2026-11-01',
+    };
+    const json = (body: unknown, status = 200) =>
+      ({ ok: status < 400, status, json: async () => body }) as Response;
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it('gets an OAuth token once and charges the customer token', async () => {
+      const fetchMock = jest
+        .spyOn(global, 'fetch')
+        .mockResolvedValueOnce(json({ access_token: 'access-1', expires_in: 3600 }))
+        .mockResolvedValue(json({ status: 1, data: { payment_id: 320025, status_code: 2 } }));
+      const gateway = new PayHereGateway(config);
+
+      await expect(gateway.chargeStoredToken(request)).resolves.toEqual({
+        succeeded: true,
+        gatewayPaymentId: '320025',
+      });
+      await gateway.chargeStoredToken(request);
+
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      const [tokenUrl, tokenInit] = fetchMock.mock.calls[0];
+      expect(tokenUrl).toBe('https://sandbox.payhere.lk/merchant/v1/oauth/token');
+      expect((tokenInit?.headers as Record<string, string>).Authorization).toBe(
+        `Basic ${Buffer.from('app-id:app-secret').toString('base64')}`,
+      );
+      const [chargeUrl, chargeInit] = fetchMock.mock.calls[1];
+      expect(chargeUrl).toBe('https://sandbox.payhere.lk/merchant/v1/payment/charge');
+      expect(JSON.parse(chargeInit?.body as string)).toEqual({
+        type: 'PAYMENT',
+        order_id: 'payment-1',
+        items: 'Bio Bloom Subscribe & Save 2026-11-01',
+        currency: 'LKR',
+        amount: 2050,
+        customer_token: 'customer-token-123',
+        custom_1: 'sub-1:2026-11-01',
+      });
+    });
+
+    it('returns a declined charge with the PayHere message', async () => {
+      jest
+        .spyOn(global, 'fetch')
+        .mockResolvedValueOnce(json({ access_token: 'access-1', expires_in: 3600 }))
+        .mockResolvedValue(
+          json({
+            status: 1,
+            data: { payment_id: 320026, status_code: -2, status_message: 'Insufficient funds' },
+          }),
+        );
+
+      await expect(new PayHereGateway(config).chargeStoredToken(request)).resolves.toEqual({
+        succeeded: false,
+        gatewayPaymentId: '320026',
+        failureReason: 'Insufficient funds',
+      });
+    });
+
+    it('throws when the Charging API is down', async () => {
+      jest
+        .spyOn(global, 'fetch')
+        .mockResolvedValueOnce(json({ access_token: 'access-1', expires_in: 3600 }))
+        .mockResolvedValue(json({}, 503));
+
+      await expect(new PayHereGateway(config).chargeStoredToken(request)).rejects.toThrow(
+        'PayHere charge responded 503',
+      );
+    });
   });
 });

@@ -1,11 +1,15 @@
 import { Module } from '@nestjs/common';
+import { PaymentsModule } from '../payments/payments.module';
+import { ShippingModule } from '../shipping/shipping.module';
+import { BillingCronService } from './billing-cron.service';
 import { SubscriptionsController } from './subscriptions.controller';
 import { SubscriptionsService } from './subscriptions.service';
 import { TokenCipherService } from './token-cipher.service';
 
 @Module({
-  providers: [SubscriptionsService, TokenCipherService],
+  imports: [PaymentsModule, ShippingModule],
+  providers: [SubscriptionsService, TokenCipherService, BillingCronService],
   controllers: [SubscriptionsController],
-  exports: [SubscriptionsService, TokenCipherService],
+  exports: [SubscriptionsService, TokenCipherService, BillingCronService],
 })
 export class SubscriptionsModule {}

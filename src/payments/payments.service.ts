@@ -11,7 +11,7 @@ import { OrderStatus, PaymentGateway, PaymentStatus, Prisma } from '@prisma/clie
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { PayHereGateway } from './gateways/payhere.gateway';
-import { StripeGateway, VerifiedPaymentEvent } from './gateways/stripe.gateway';
+import { StoredTokenCharge, StripeGateway, VerifiedPaymentEvent } from './gateways/stripe.gateway';
 
 export interface PaymentIntent {
   gateway: PaymentGateway;
@@ -54,6 +54,40 @@ export class PaymentsService {
       refundId,
       ...(succeeded ? {} : { failureReason: 'gateway_refund_declined' }),
     };
+  }
+
+  /**
+   * SDS §5.4 — charges a subscription's stored token off-session for a
+   * Subscribe & Save renewal. A decline or a gateway error comes back as
+   * `succeeded: false` with a reason and is never thrown, so one bad token
+   * cannot stop a billing run. In tests a token containing "fail" or
+   * "decline" is declined.
+   */
+  async chargeStoredToken(input: {
+    paymentId: string;
+    gateway: PaymentGateway;
+    token: string;
+    amount: string;
+    currency: string;
+    idempotencyKey: string;
+    description: string;
+  }): Promise<StoredTokenCharge> {
+    if (this.config.get<string>('NODE_ENV') === 'test') {
+      const suffix = randomUUID().replace(/-/g, '').slice(0, 24);
+      const gatewayPaymentId =
+        input.gateway === PaymentGateway.STRIPE ? `pi_test_${suffix}` : `payhere_test_${suffix}`;
+      return /fail|decline/i.test(input.token)
+        ? { succeeded: false, gatewayPaymentId, failureReason: 'card_declined' }
+        : { succeeded: true, gatewayPaymentId };
+    }
+    try {
+      return input.gateway === PaymentGateway.STRIPE
+        ? await this.stripe.chargeStoredToken(input)
+        : await this.payHere.chargeStoredToken(input);
+    } catch (e) {
+      this.logger.error(`Stored-token charge ${input.paymentId} failed: ${(e as Error).message}`);
+      return { succeeded: false, failureReason: 'gateway_error' };
+    }
   }
 
   async createIntent(input: {

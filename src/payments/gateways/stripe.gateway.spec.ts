@@ -54,4 +54,62 @@ describe('StripeGateway', () => {
     const gateway = new StripeGateway(config);
     expect(() => gateway.parseWebhook(Buffer.from('{}'), 't=1,v1=bad')).toThrow();
   });
+
+  describe('chargeStoredToken', () => {
+    const request = {
+      paymentId: 'payment-1',
+      token: 'cus_123:pm_456',
+      amount: '2050.00',
+      currency: 'LKR',
+      idempotencyKey: 'sub-1:2026-11-01',
+      description: 'Bio Bloom Subscribe & Save 2026-11-01',
+    };
+    const withClient = (create: jest.Mock) => {
+      const gateway = new StripeGateway(config);
+      jest
+        .spyOn(gateway as unknown as { client: () => unknown }, 'client')
+        .mockReturnValue({ paymentIntents: { create } });
+      return gateway;
+    };
+
+    it('confirms an off-session intent for the saved customer and card', async () => {
+      const create = jest.fn().mockResolvedValue({ id: 'pi_1', status: 'succeeded' });
+
+      await expect(withClient(create).chargeStoredToken(request)).resolves.toEqual({
+        succeeded: true,
+        gatewayPaymentId: 'pi_1',
+      });
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          amount: 205000,
+          currency: 'lkr',
+          customer: 'cus_123',
+          payment_method: 'pm_456',
+          off_session: true,
+          confirm: true,
+        }),
+        { idempotencyKey: 'sub-1:2026-11-01' },
+      );
+    });
+
+    it('returns a card decline as a failed charge', async () => {
+      const create = jest.fn().mockRejectedValue({
+        type: 'StripeCardError',
+        decline_code: 'insufficient_funds',
+        payment_intent: { id: 'pi_2' },
+      });
+
+      await expect(withClient(create).chargeStoredToken(request)).resolves.toEqual({
+        succeeded: false,
+        gatewayPaymentId: 'pi_2',
+        failureReason: 'insufficient_funds',
+      });
+    });
+
+    it('throws errors that are not card declines', async () => {
+      const create = jest.fn().mockRejectedValue(new Error('network down'));
+
+      await expect(withClient(create).chargeStoredToken(request)).rejects.toThrow('network down');
+    });
+  });
 });
