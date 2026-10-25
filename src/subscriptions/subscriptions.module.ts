@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { CronLockService } from '../common/locks/cron-lock.service';
 import { PaymentsModule } from '../payments/payments.module';
 import { ShippingModule } from '../shipping/shipping.module';
 import { BillingCronService } from './billing-cron.service';
@@ -8,7 +9,7 @@ import { TokenCipherService } from './token-cipher.service';
 
 @Module({
   imports: [PaymentsModule, ShippingModule],
-  providers: [SubscriptionsService, TokenCipherService, BillingCronService],
+  providers: [SubscriptionsService, TokenCipherService, BillingCronService, CronLockService],
   controllers: [SubscriptionsController],
   exports: [SubscriptionsService, TokenCipherService, BillingCronService],
 })

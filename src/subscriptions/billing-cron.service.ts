@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { OrderStatus, PaymentStatus, Prisma, SubscriptionStatus } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { CronLockService } from '../common/locks/cron-lock.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -48,11 +49,13 @@ export class BillingCronService {
     private readonly payments: PaymentsService,
     private readonly notifications: NotificationsService,
     private readonly cipher: TokenCipherService,
+    private readonly locks: CronLockService,
   ) {}
 
+  /** Only the instance that takes today's lock bills; the others skip. */
   @Cron(CronExpression.EVERY_DAY_AT_6AM)
-  async runDaily(): Promise<BillingRunResult> {
-    return this.runBilling();
+  async runDaily(): Promise<BillingRunResult | null> {
+    return this.locks.runExclusive(CronLockService.daily('billing'), 3600, () => this.runBilling());
   }
 
   /** The scheduled run, callable directly from tests. */

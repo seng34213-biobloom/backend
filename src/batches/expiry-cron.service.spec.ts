@@ -1,4 +1,5 @@
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { CronLockService } from '../common/locks/cron-lock.service';
 import { ExpiryCronService } from './expiry-cron.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -6,6 +7,7 @@ describe('ExpiryCronService', () => {
   let svc: ExpiryCronService;
   let prisma: jest.Mocked<PrismaService>;
   let events: jest.Mocked<EventEmitter2>;
+  let locks: { runExclusive: jest.Mock };
 
   beforeEach(() => {
     prisma = {
@@ -15,7 +17,10 @@ describe('ExpiryCronService', () => {
       },
     } as unknown as jest.Mocked<PrismaService>;
     events = { emit: jest.fn() } as unknown as jest.Mocked<EventEmitter2>;
-    svc = new ExpiryCronService(prisma, events);
+    locks = {
+      runExclusive: jest.fn((_name: string, _ttl: number, fn: () => Promise<unknown>) => fn()),
+    };
+    svc = new ExpiryCronService(prisma, events, locks as unknown as CronLockService);
   });
 
   function inDays(n: number): Date {
@@ -147,5 +152,19 @@ describe('ExpiryCronService', () => {
   it('runDaily runs the sweep', async () => {
     await expect(svc.runDaily()).resolves.toEqual({ expiredCount: 0, expiringSoonCount: 0 });
     expect(prisma.productBatch.findMany).toHaveBeenCalledTimes(2);
+  });
+
+  it('sweeps under the daily expiry lock and skips when another instance holds it', async () => {
+    await expect(svc.runDaily()).resolves.toEqual({ expiredCount: 0, expiringSoonCount: 0 });
+    expect(locks.runExclusive).toHaveBeenCalledWith(
+      expect.stringMatching(/^expiry:\d{4}-\d{2}-\d{2}$/),
+      3600,
+      expect.any(Function),
+    );
+
+    (prisma.productBatch.findMany as jest.Mock).mockClear();
+    locks.runExclusive.mockResolvedValue(null);
+    await expect(svc.runDaily()).resolves.toBeNull();
+    expect(prisma.productBatch.findMany).not.toHaveBeenCalled();
   });
 });

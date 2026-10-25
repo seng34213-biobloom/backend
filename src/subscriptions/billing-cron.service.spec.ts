@@ -1,4 +1,5 @@
 import { PaymentGateway, PaymentStatus, Prisma, SubscriptionStatus } from '@prisma/client';
+import { CronLockService } from '../common/locks/cron-lock.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -31,6 +32,7 @@ describe('BillingCronService', () => {
     emitSubscriptionChargeFailed: jest.Mock;
   };
   let cipher: { decrypt: jest.Mock };
+  let locks: { runExclusive: jest.Mock };
 
   const subscription = (overrides: Record<string, unknown> = {}) => ({
     id: 'sub-1',
@@ -89,6 +91,9 @@ describe('BillingCronService', () => {
       emitSubscriptionChargeFailed: jest.fn(),
     };
     cipher = { decrypt: jest.fn().mockResolvedValue('cus_1:pm_1') };
+    locks = {
+      runExclusive: jest.fn((_name: string, _ttl: number, fn: () => Promise<unknown>) => fn()),
+    };
 
     svc = new BillingCronService(
       prisma as unknown as PrismaService,
@@ -97,6 +102,7 @@ describe('BillingCronService', () => {
       payments as unknown as PaymentsService,
       notifications as unknown as NotificationsService,
       cipher as unknown as TokenCipherService,
+      locks as unknown as CronLockService,
     );
   });
 
@@ -253,17 +259,31 @@ describe('BillingCronService', () => {
     });
   });
 
-  it('bills from the start of today when the schedule fires', async () => {
+  it('bills from the start of today under the daily billing lock', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-11-01T06:00:00.000Z'));
     try {
       await svc.runDaily();
     } finally {
       jest.useRealTimers();
     }
+    expect(locks.runExclusive).toHaveBeenCalledWith(
+      'billing:2026-11-01',
+      3600,
+      expect.any(Function),
+    );
     expect(prisma.subscription.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { status: SubscriptionStatus.ACTIVE, nextBillingDate: { lte: today } },
       }),
     );
+  });
+
+  it('charges nothing and creates no order when another instance holds the lock', async () => {
+    locks.runExclusive.mockResolvedValue(null);
+
+    await expect(svc.runDaily()).resolves.toBeNull();
+    expect(prisma.subscription.findMany).not.toHaveBeenCalled();
+    expect(payments.chargeStoredToken).not.toHaveBeenCalled();
+    expect(tx.order.create).not.toHaveBeenCalled();
   });
 });
