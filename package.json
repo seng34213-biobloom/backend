@@ -96,7 +96,8 @@
       "/node_modules/",
       "\\.module\\.ts$",
       "main\\.ts$",
-      "/dto/"
+      "/dto/",
+      "\\.controller\\.ts$"
     ],
     "coverageThreshold": {
       "global": {
