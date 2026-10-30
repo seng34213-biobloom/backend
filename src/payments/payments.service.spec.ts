@@ -1,3 +1,4 @@
+import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OrderStatus, PaymentGateway, PaymentStatus, Prisma } from '@prisma/client';
@@ -13,8 +14,9 @@ describe('PaymentsService', () => {
   let payHere: jest.Mocked<PayHereGateway>;
   let events: jest.Mocked<EventEmitter2>;
   let useRealGateways: boolean;
+  let configValues: Record<string, string>;
   let transaction: {
-    payment: { findUnique: jest.Mock };
+    payment: { findUnique: jest.Mock; findFirst: jest.Mock; update: jest.Mock };
     order: { update: jest.Mock; findUnique: jest.Mock };
     orderItem: { findMany: jest.Mock };
     productBatch: { findUnique: jest.Mock; update: jest.Mock };
@@ -35,6 +37,7 @@ describe('PaymentsService', () => {
       $queryRaw: jest.fn().mockResolvedValue([{ id: payment.id }]),
       payment: {
         findUnique: jest.fn().mockResolvedValue(payment),
+        findFirst: jest.fn().mockResolvedValue(null),
         update: jest.fn().mockResolvedValue(payment),
       },
       order: {
@@ -51,16 +54,17 @@ describe('PaymentsService', () => {
     useRealGateways = false;
     prisma = {
       payment: {
-        create: jest.fn().mockResolvedValue({ id: payment.id }),
+        create: jest.fn().mockResolvedValue({ id: payment.id, status: PaymentStatus.PENDING }),
         update: jest.fn().mockResolvedValue({}),
       },
       order: { findUnique: jest.fn() },
+      customer: { findUnique: jest.fn().mockResolvedValue({ phone: '0771234567' }) },
       $transaction: jest.fn((callback: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
         callback(tx as unknown as Prisma.TransactionClient),
       ),
     } as unknown as jest.Mocked<PrismaService>;
     stripe = {
-      createIntent: jest.fn(),
+      createCheckoutSession: jest.fn(),
       parseWebhook: jest.fn(),
       chargeStoredToken: jest.fn(),
     } as unknown as jest.Mocked<StripeGateway>;
@@ -70,9 +74,10 @@ describe('PaymentsService', () => {
       chargeStoredToken: jest.fn(),
     } as unknown as jest.Mocked<PayHereGateway>;
     events = { emit: jest.fn() } as unknown as jest.Mocked<EventEmitter2>;
+    configValues = { STOREFRONT_URL: 'https://shop.example.com/' };
     const config = {
       get: jest.fn((key: string) =>
-        key === 'NODE_ENV' ? (useRealGateways ? 'development' : 'test') : undefined,
+        key === 'NODE_ENV' ? (useRealGateways ? 'development' : 'test') : configValues[key],
       ),
     } as unknown as ConfigService;
     service = new PaymentsService(prisma, events, config, stripe, payHere);
@@ -115,11 +120,29 @@ describe('PaymentsService', () => {
     expect(intent.gatewayPaymentId).toMatch(/^payhere_test_[a-f0-9]{24}$/);
   });
 
-  it('creates and persists a Stripe intent through the configured gateway', async () => {
+  it('sends test mode checkouts straight to the return page', async () => {
+    const intent = await service.createIntent({
+      orderId: 'order-1',
+      amount: '1500.00',
+      currency: 'LKR',
+      gateway: PaymentGateway.STRIPE,
+    });
+
+    expect(intent).toMatchObject({
+      id: payment.id,
+      status: PaymentStatus.PENDING,
+      checkout: {
+        method: 'REDIRECT',
+        url: 'https://shop.example.com/checkout/complete?orderId=order-1',
+      },
+    });
+  });
+
+  it('creates a hosted Stripe checkout and stores the session as the payment', async () => {
     useRealGateways = true;
-    stripe.createIntent.mockResolvedValue({
-      id: 'pi_stripe_1',
-      clientSecret: 'pi_stripe_1_secret',
+    stripe.createCheckoutSession.mockResolvedValue({
+      id: 'cs_test_1',
+      url: 'https://checkout.stripe.com/c/cs_test_1',
     });
 
     const intent = await service.createIntent({
@@ -129,14 +152,132 @@ describe('PaymentsService', () => {
       gateway: PaymentGateway.STRIPE,
     });
 
-    expect(stripe.createIntent).toHaveBeenCalledWith({
+    expect(stripe.createCheckoutSession).toHaveBeenCalledWith({
       orderId: 'order-1',
       amount: '1500.00',
       currency: 'LKR',
+      successUrl: 'https://shop.example.com/checkout/complete?orderId=order-1',
+      cancelUrl: 'https://shop.example.com/account/orders/order-1',
     });
     expect(intent).toMatchObject({
-      gatewayPaymentId: 'pi_stripe_1',
-      clientSecret: 'pi_stripe_1_secret',
+      id: payment.id,
+      gatewayPaymentId: 'cs_test_1',
+      clientSecret: null,
+      checkout: { method: 'REDIRECT', url: 'https://checkout.stripe.com/c/cs_test_1' },
+    });
+    expect(prisma.payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ gatewayPaymentId: 'cs_test_1' }),
+      }),
+    );
+  });
+
+  it('turns the PayHere form into a form post for the storefront', async () => {
+    useRealGateways = true;
+    (prisma.order.findUnique as jest.Mock).mockResolvedValue({
+      customer: { name: 'Nimal', email: 'n@example.com', phone: '0771234567' },
+      shippingAddress: { line1: '1 Road', line2: null, city: 'Colombo', country: 'LK' },
+    });
+    payHere.createCheckout.mockReturnValue({
+      orderReference: 'payhere_order-1',
+      checkoutUrl: 'https://sandbox.payhere.lk/pay/checkout',
+      params: { merchant_id: 'm1' },
+    });
+
+    const intent = await service.createIntent({
+      orderId: 'order-1',
+      amount: '1500.00',
+      currency: 'LKR',
+      gateway: PaymentGateway.PAYHERE,
+    });
+
+    expect(intent.checkout).toEqual({
+      method: 'FORM_POST',
+      url: 'https://sandbox.payhere.lk/pay/checkout',
+      fields: { merchant_id: 'm1' },
+    });
+  });
+
+  describe('assertCheckoutAvailable', () => {
+    beforeEach(() => {
+      useRealGateways = true;
+    });
+
+    it('needs nothing in test mode', async () => {
+      useRealGateways = false;
+      await expect(
+        service.assertCheckoutAvailable(PaymentGateway.PAYHERE, 'customer-1'),
+      ).resolves.toBeUndefined();
+    });
+
+    it('refuses Stripe without a secret key', async () => {
+      await expect(
+        service.assertCheckoutAvailable(PaymentGateway.STRIPE, 'customer-1'),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      configValues.STRIPE_SECRET_KEY = 'sk_test_123';
+      await expect(
+        service.assertCheckoutAvailable(PaymentGateway.STRIPE, 'customer-1'),
+      ).resolves.toBeUndefined();
+    });
+
+    it('refuses PayHere until a merchant is configured', async () => {
+      await expect(
+        service.assertCheckoutAvailable(PaymentGateway.PAYHERE, 'customer-1'),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    });
+
+    it('needs a phone number for PayHere', async () => {
+      configValues.PAYHERE_MERCHANT_ID = 'm1';
+      configValues.PAYHERE_MERCHANT_SECRET = 'secret';
+      await expect(
+        service.assertCheckoutAvailable(PaymentGateway.PAYHERE, 'customer-1'),
+      ).resolves.toBeUndefined();
+
+      (prisma.customer.findUnique as jest.Mock).mockResolvedValue({ phone: null });
+      await expect(
+        service.assertCheckoutAvailable(PaymentGateway.PAYHERE, 'customer-1'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  describe('hosted checkout events carrying a different id', () => {
+    const intentEvent = (type: VerifiedPaymentEvent['type']): VerifiedPaymentEvent => ({
+      gateway: PaymentGateway.STRIPE,
+      gatewayPaymentId: 'pi_from_session',
+      type,
+      orderId: 'order-1',
+      amount: '1500',
+      currency: 'lkr',
+      rawPayload: { id: 'evt-pi' },
+    });
+
+    beforeEach(() => {
+      transaction.payment.findUnique.mockResolvedValueOnce(null);
+      transaction.payment.findFirst.mockResolvedValue(payment);
+    });
+
+    it('settles the order from a signed payment intent success', async () => {
+      stripe.parseWebhook.mockReturnValue(intentEvent('payment_succeeded'));
+
+      await expect(service.handleStripeWebhook(Buffer.from('{}'), 'sig')).resolves.toMatchObject({
+        status: 'applied',
+        paymentStatus: PaymentStatus.PAID,
+      });
+      expect(transaction.payment.findFirst).toHaveBeenCalledWith({
+        where: { orderId: 'order-1', gateway: PaymentGateway.STRIPE },
+      });
+    });
+
+    it('leaves the order open when a card is declined on the hosted page', async () => {
+      stripe.parseWebhook.mockReturnValue(intentEvent('payment_failed'));
+
+      await expect(service.handleStripeWebhook(Buffer.from('{}'), 'sig')).resolves.toMatchObject({
+        status: 'duplicate',
+        paymentStatus: PaymentStatus.PENDING,
+      });
+      expect(transaction.order.update).not.toHaveBeenCalled();
+      expect(transaction.payment.update).not.toHaveBeenCalled();
     });
   });
 

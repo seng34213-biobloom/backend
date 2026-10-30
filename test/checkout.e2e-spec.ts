@@ -214,6 +214,25 @@ describe('Atomic checkout (e2e)', () => {
       currency: 'LKR',
     });
     expect(response.body.payment.gatewayPaymentId).toMatch(/^pi_test_/);
+    expect(response.body.order.orderNumber).toEqual(expect.any(Number));
+    expect(response.body.payment).toMatchObject({
+      id: expect.any(String),
+      status: 'PENDING',
+      checkout: { method: 'REDIRECT', url: expect.stringContaining('/checkout/complete?orderId=') },
+    });
+
+    const list = await fixture.alice.agent.get('/api/orders').expect(200);
+    expect(list.body[0]).toMatchObject({ id: response.body.order.id, itemCount: 2 });
+    const detail = await fixture.alice.agent
+      .get(`/api/orders/${response.body.order.id as string}`)
+      .expect(200);
+    expect(detail.body).toMatchObject({
+      subtotal: '6000.00',
+      discountAmount: '0.00',
+      shippingFee: '750.00',
+      delivery: null,
+    });
+    expect(detail.body.items[0].productName).toEqual(expect.any(String));
 
     const order = await prisma.order.findUniqueOrThrow({
       where: { id: response.body.order.id as string },

@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Checkout returns `payment.checkout`: a redirect to a hosted Stripe Checkout page, or the signed PayHere form. Stripe `checkout.session.*` events settle the order, and a gateway that cannot take the payment is refused before the cart and stock are touched (#74)
+- Customer order list and detail include `orderNumber`, `itemCount`, `subtotal`, product names, refund requests and delivery status; raw gateway payloads are no longer returned (#74)
 - Contributing guide, pull request template with the Definition of Done, CODEOWNERS, and the architecture decision records ADR-001 to ADR-013 in `docs/adr/` (#70)
 - Unpaid checkouts are cancelled after `PENDING_ORDER_TIMEOUT_MINUTES` (30 by default): the payment fails, the units go back to unexpired batches and a SYSTEM audit entry is written; a payment that succeeds after its order was cancelled is refunded (#64)
 - k6 load tests in `load-test/`: checkout at 50 concurrent shoppers (p95 under 600 ms, under 1% failures) and one billing run over 200 due subscriptions (under 60 s), with a fixture and an admin-only billing trigger that production builds do not expose; the rate limits are configurable through `THROTTLE_*` for test environments (#68)

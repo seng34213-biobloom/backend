@@ -13,12 +13,18 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PayHereGateway } from './gateways/payhere.gateway';
 import { StoredTokenCharge, StripeGateway, VerifiedPaymentEvent } from './gateways/stripe.gateway';
 
+/** How the storefront sends the customer to the gateway's hosted page. */
+export type PaymentCheckout =
+  | { method: 'REDIRECT'; url: string }
+  | { method: 'FORM_POST'; url: string; fields: Record<string, string> };
+
 export interface PaymentIntent {
+  id: string;
+  status: PaymentStatus;
   gateway: PaymentGateway;
   gatewayPaymentId: string;
   clientSecret: string | null;
-  checkoutUrl?: string;
-  checkoutParams?: Record<string, string>;
+  checkout: PaymentCheckout;
   amount: string;
   currency: string;
 }
@@ -90,6 +96,41 @@ export class PaymentsService {
     }
   }
 
+  /**
+   * Called before checkout commits, so a gateway that cannot take the payment
+   * fails while the cart and stock are still untouched.
+   */
+  async assertCheckoutAvailable(gateway: PaymentGateway, customerId: string): Promise<void> {
+    if (this.config.get<string>('NODE_ENV') === 'test') return;
+    this.assertWebhookSecret(gateway);
+    if (gateway === PaymentGateway.STRIPE) {
+      if (!this.config.get<string>('STRIPE_SECRET_KEY')) {
+        throw new ServiceUnavailableException('Card payment is not available right now');
+      }
+      return;
+    }
+    if (
+      !this.config.get<string>('PAYHERE_MERCHANT_ID') ||
+      !this.config.get<string>('PAYHERE_MERCHANT_SECRET')
+    ) {
+      throw new ServiceUnavailableException(
+        'PayHere is not available right now; please choose another payment method',
+      );
+    }
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { phone: true },
+    });
+    if (!customer?.phone) {
+      throw new BadRequestException('A phone number is required for PayHere checkout');
+    }
+  }
+
+  private storefrontUrl(path: string): string {
+    const base = this.config.get<string>('STOREFRONT_URL') ?? 'http://localhost:3000';
+    return `${base.replace(/\/$/, '')}${path}`;
+  }
+
   async createIntent(input: {
     orderId: string;
     amount: string;
@@ -97,7 +138,8 @@ export class PaymentsService {
     gateway: PaymentGateway;
   }): Promise<PaymentIntent> {
     this.assertWebhookSecret(input.gateway);
-    let intent: PaymentIntent;
+    const successUrl = this.storefrontUrl(`/checkout/complete?orderId=${input.orderId}`);
+    let intent: Omit<PaymentIntent, 'id' | 'status'>;
 
     if (this.config.get<string>('NODE_ENV') === 'test') {
       const suffix = randomUUID().replace(/-/g, '').slice(0, 24);
@@ -107,19 +149,23 @@ export class PaymentsService {
         gateway: input.gateway,
         gatewayPaymentId,
         clientSecret: `${gatewayPaymentId}_secret_${randomUUID().replace(/-/g, '').slice(0, 16)}`,
+        checkout: { method: 'REDIRECT', url: successUrl },
         amount: input.amount,
         currency: input.currency,
       };
     } else if (input.gateway === PaymentGateway.STRIPE) {
-      const created = await this.stripe.createIntent({
+      const session = await this.stripe.createCheckoutSession({
         orderId: input.orderId,
         amount: input.amount,
         currency: input.currency,
+        successUrl,
+        cancelUrl: this.storefrontUrl(`/account/orders/${input.orderId}`),
       });
       intent = {
         gateway: input.gateway,
-        gatewayPaymentId: created.id,
-        clientSecret: created.clientSecret,
+        gatewayPaymentId: session.id,
+        clientSecret: null,
+        checkout: { method: 'REDIRECT', url: session.url },
         amount: input.amount,
         currency: input.currency,
       };
@@ -140,14 +186,13 @@ export class PaymentsService {
         gateway: input.gateway,
         gatewayPaymentId: checkout.orderReference,
         clientSecret: null,
-        checkoutUrl: checkout.checkoutUrl,
-        checkoutParams: checkout.params,
+        checkout: { method: 'FORM_POST', url: checkout.checkoutUrl, fields: checkout.params },
         amount: input.amount,
         currency: input.currency,
       };
     }
 
-    await this.prisma.payment.create({
+    const payment = await this.prisma.payment.create({
       data: {
         orderId: input.orderId,
         gateway: input.gateway,
@@ -158,7 +203,7 @@ export class PaymentsService {
       },
     });
     this.logger.log(`Payment intent ${intent.gatewayPaymentId} created for order=${input.orderId}`);
-    return intent;
+    return { ...intent, id: payment.id, status: payment.status };
   }
 
   private assertWebhookSecret(gateway: PaymentGateway): void {
@@ -190,9 +235,25 @@ export class PaymentsService {
     paymentStatus: PaymentStatus;
   }> {
     const result = await this.prisma.$transaction(async (tx) => {
-      const found = await tx.payment.findUnique({
+      const direct = await tx.payment.findUnique({
         where: { gatewayPaymentId: event.gatewayPaymentId },
       });
+      // Stripe also reports a hosted checkout through its payment intent, whose id we never
+      // stored. A declined card can still be retried on that page, so only a success counts.
+      const found =
+        direct ??
+        (event.orderId
+          ? await tx.payment.findFirst({
+              where: { orderId: event.orderId, gateway: event.gateway },
+            })
+          : null);
+      if (found && !direct && event.type === 'payment_failed') {
+        return {
+          status: 'duplicate' as const,
+          orderId: found.orderId ?? '',
+          paymentStatus: found.status,
+        };
+      }
       if (!found || found.gateway !== event.gateway) {
         throw new NotFoundException(
           `No ${event.gateway} payment for gatewayPaymentId ${event.gatewayPaymentId}`,

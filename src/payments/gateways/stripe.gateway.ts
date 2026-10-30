@@ -7,6 +7,8 @@ export interface VerifiedPaymentEvent {
   gateway: PaymentGateway;
   gatewayPaymentId: string;
   type: 'payment_succeeded' | 'payment_failed';
+  // Signed into the event, for events that carry a different id from the stored payment
+  orderId?: string;
   amount?: string;
   currency?: string;
   rawPayload: unknown;
@@ -27,28 +29,53 @@ export interface StoredTokenCharge {
   failureReason?: string;
 }
 
+const SESSION_OUTCOMES: Record<string, VerifiedPaymentEvent['type']> = {
+  'checkout.session.completed': 'payment_succeeded',
+  'checkout.session.async_payment_succeeded': 'payment_succeeded',
+  'checkout.session.async_payment_failed': 'payment_failed',
+  'checkout.session.expired': 'payment_failed',
+};
+
+// Stripe's minimum; just past the unpaid order timeout (ADR-010)
+const CHECKOUT_SESSION_MINUTES = 31;
+
 @Injectable()
 export class StripeGateway {
   constructor(private readonly config: ConfigService) {}
 
-  async createIntent(input: {
+  /** Hosted Stripe Checkout page for one order; card details never reach us (ADR-009). */
+  async createCheckoutSession(input: {
     orderId: string;
     amount: string;
     currency: string;
-  }): Promise<{ id: string; clientSecret: string }> {
-    const paymentIntent = await this.client().paymentIntents.create(
+    successUrl: string;
+    cancelUrl: string;
+  }): Promise<{ id: string; url: string }> {
+    const metadata = { orderId: input.orderId };
+    const session = await this.client().checkout.sessions.create(
       {
-        amount: Math.round(Number(input.amount) * 100),
-        currency: input.currency.toLowerCase(),
-        automatic_payment_methods: { enabled: true },
-        metadata: { orderId: input.orderId },
+        mode: 'payment',
+        client_reference_id: input.orderId,
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency: input.currency.toLowerCase(),
+              unit_amount: Math.round(Number(input.amount) * 100),
+              product_data: { name: 'Bio Bloom order' },
+            },
+          },
+        ],
+        success_url: input.successUrl,
+        cancel_url: input.cancelUrl,
+        expires_at: Math.floor(Date.now() / 1000) + CHECKOUT_SESSION_MINUTES * 60,
+        metadata,
+        payment_intent_data: { metadata },
       },
-      { idempotencyKey: `order-${input.orderId}` },
+      { idempotencyKey: `checkout-${input.orderId}` },
     );
-    if (!paymentIntent.client_secret) {
-      throw new ServiceUnavailableException('Stripe did not return a client secret');
-    }
-    return { id: paymentIntent.id, clientSecret: paymentIntent.client_secret };
+    if (!session.url) throw new ServiceUnavailableException('Stripe did not return a checkout URL');
+    return { id: session.id, url: session.url };
   }
 
   parseWebhook(rawBody: Buffer, signature: string | undefined): VerifiedPaymentEvent {
@@ -65,6 +92,23 @@ export class StripeGateway {
       throw new BadRequestException(`Stripe webhook signature or payload is invalid: ${message}`);
     }
 
+    const sessionOutcome = SESSION_OUTCOMES[event.type];
+    if (sessionOutcome) {
+      const session = event.data.object as Stripe.Checkout.Session;
+      if (event.type === 'checkout.session.completed' && session.payment_status !== 'paid') {
+        throw new BadRequestException(`Stripe session is ${session.payment_status}, not paid`);
+      }
+      return {
+        gateway: PaymentGateway.STRIPE,
+        gatewayPaymentId: session.id,
+        type: sessionOutcome,
+        orderId: session.metadata?.orderId,
+        amount: session.amount_total === null ? undefined : String(session.amount_total / 100),
+        currency: session.currency ?? undefined,
+        rawPayload: event,
+      };
+    }
+
     if (
       event.type !== 'payment_intent.succeeded' &&
       event.type !== 'payment_intent.payment_failed'
@@ -76,6 +120,7 @@ export class StripeGateway {
       gateway: PaymentGateway.STRIPE,
       gatewayPaymentId: intent.id,
       type: event.type === 'payment_intent.succeeded' ? 'payment_succeeded' : 'payment_failed',
+      orderId: intent.metadata?.orderId,
       amount: String(
         (event.type === 'payment_intent.succeeded'
           ? (intent.amount_received ?? intent.amount)

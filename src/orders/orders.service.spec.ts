@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { OrderStatus, PaymentGateway, PaymentStatus } from '@prisma/client';
+import { OrderStatus, PaymentGateway, PaymentStatus, Prisma } from '@prisma/client';
 import { InventoryService } from '../inventory/inventory.service';
 import { OutOfStockError } from '../inventory/inventory.errors';
 import { PaymentsService } from '../payments/payments.service';
@@ -76,6 +76,7 @@ describe('OrdersService', () => {
       }),
     } as unknown as jest.Mocked<ShippingService>;
     payments = {
+      assertCheckoutAvailable: jest.fn().mockResolvedValue(undefined),
       createIntent: jest.fn().mockResolvedValue({
         gateway: PaymentGateway.STRIPE,
         gatewayPaymentId: 'pi_test_abc',
@@ -85,6 +86,71 @@ describe('OrdersService', () => {
       }),
     } as unknown as jest.Mocked<PaymentsService>;
     service = new OrdersService(prisma, inventory, shipping, payments);
+  });
+
+  it('stops before touching the cart when the gateway cannot take the payment', async () => {
+    (payments.assertCheckoutAvailable as jest.Mock).mockRejectedValue(
+      new Error('PayHere is not available'),
+    );
+
+    await expect(service.checkout('customer-1', 'address-1')).rejects.toThrow('PayHere');
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(payments.createIntent).not.toHaveBeenCalled();
+  });
+
+  it('summarises a customer order list', async () => {
+    (prisma.order.findMany as jest.Mock).mockResolvedValue([
+      {
+        id: 'order-1',
+        orderNumber: 7,
+        placedAt: new Date('2026-10-30'),
+        status: 'PAID',
+        totalAmount: new Prisma.Decimal('1000'),
+        _count: { items: 2 },
+      },
+    ]);
+
+    await expect(service.listForCustomer('customer-1')).resolves.toEqual([
+      expect.objectContaining({ orderNumber: 7, totalAmount: '1000.00', itemCount: 2 }),
+    ]);
+  });
+
+  it('builds the customer order page and refuses other customers', async () => {
+    (prisma.order.findUnique as jest.Mock).mockResolvedValue({
+      id: 'order-1',
+      orderNumber: 7,
+      customerId: 'customer-1',
+      status: 'PAID',
+      totalAmount: new Prisma.Decimal('1000'),
+      totalWeight: new Prisma.Decimal('500'),
+      shippingFee: new Prisma.Decimal('200'),
+      items: [
+        {
+          id: 'item-1',
+          quantity: 2,
+          unitPriceSnapshot: new Prisma.Decimal('400'),
+          lineTotal: new Prisma.Decimal('800'),
+          variant: { name: 'Jam', size: '250g', sku: 'S', product: { name: 'Strawberry Jam' } },
+        },
+      ],
+      payments: [
+        { id: 'p1', gateway: 'STRIPE', status: 'REFUNDED', amount: new Prisma.Decimal('1000') },
+        { id: 'p2', gateway: 'STRIPE', status: 'PAID', amount: new Prisma.Decimal('1000') },
+      ],
+      refundRequests: [{ id: 'r1', amount: new Prisma.Decimal('100') }],
+      deliveryAssignment: { status: 'ASSIGNED', deliveryUser: { name: 'Rider' } },
+    });
+
+    const out = await service.getOrder('customer-1', 'order-1');
+
+    expect(out).toMatchObject({ subtotal: '800.00', discountAmount: '0.00', totalWeightG: 500 });
+    expect(out.items[0]).toMatchObject({ productName: 'Strawberry Jam', lineTotal: '800.00' });
+    expect(out.payments.map((p) => p.refundedAmount)).toEqual(['1000.00', '0.00']);
+    expect(out.payments[0]).not.toHaveProperty('rawPayload');
+    expect(out.refundRequests[0].amount).toBe('100.00');
+    expect(out.delivery?.riderName).toBe('Rider');
+    await expect(service.getOrder('someone-else', 'order-1')).rejects.toThrow('Not your order');
   });
 
   it('returns an empty quote without requiring shipping rates', async () => {
