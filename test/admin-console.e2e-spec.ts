@@ -33,6 +33,7 @@ describe('Admin console API (e2e)', () => {
   const namespace = fixtureNamespace('console');
   const email = (name: string) => fixtureEmail(namespace, name);
   const password = 'ConsoleTest2026';
+  const promoCode = `c${namespace.slice(-20)}`;
   const ids = {
     admin: '',
     customer: '',
@@ -195,6 +196,29 @@ describe('Admin console API (e2e)', () => {
   });
 
   afterAll(async () => {
+    if (prisma) {
+      const orders = { customerId: ids.customer };
+      const products = { sellerId: ids.seller };
+      await prisma.deliveryAssignment.deleteMany({ where: { order: orders } });
+      await prisma.productReview.deleteMany({ where: { customerId: ids.customer } });
+      await prisma.supportTicket.deleteMany({ where: { customerId: ids.customer } });
+      await prisma.subscription.deleteMany({ where: { customerId: ids.customer } });
+      await prisma.payment.deleteMany({ where: { order: orders } });
+      await prisma.order.deleteMany({ where: orders });
+      await prisma.bundle.deleteMany({ where: products });
+      await prisma.product.deleteMany({ where: products });
+      await prisma.seller.deleteMany({ where: { id: ids.seller } });
+      await prisma.address.deleteMany({ where: { customerId: ids.customer } });
+      await prisma.customer.deleteMany({ where: { id: ids.customer } });
+      await prisma.promoCode.deleteMany({
+        where: { code: { startsWith: promoCode.toUpperCase() } },
+      });
+      await prisma.deliveryUser.deleteMany({ where: { email: { contains: namespace } } });
+      await prisma.auditLog.deleteMany({
+        where: { adminUser: { email: { contains: namespace } } },
+      });
+      await prisma.adminUser.deleteMany({ where: { email: { contains: namespace } } });
+    }
     await app.close();
   });
 
@@ -390,7 +414,7 @@ describe('Admin console API (e2e)', () => {
   });
 
   describe('promo codes', () => {
-    const code = `C${namespace.slice(-20)}`.toLowerCase();
+    const code = promoCode;
 
     it('creates, lists and toggles a code', async () => {
       const created = await post(admin, '/api/admin/promo-codes', {
