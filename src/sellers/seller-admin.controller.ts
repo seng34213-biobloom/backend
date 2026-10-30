@@ -7,8 +7,9 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { Role, SellerStatus } from '@prisma/client';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../auth/types/auth.types';
@@ -24,6 +25,12 @@ import { RejectDto } from './dto/reject.dto';
 @Roles(Role.ADMIN)
 export class SellerAdminController {
   constructor(private readonly sellers: SellerService) {}
+
+  @Get()
+  async list(@Query('status') status?: SellerStatus) {
+    const valid = status && (Object.values(SellerStatus) as string[]).includes(status);
+    return this.sellers.listAll(valid ? status : undefined);
+  }
 
   @Get('pending')
   async pending() {
@@ -47,5 +54,24 @@ export class SellerAdminController {
     @CurrentUser() admin: AuthenticatedUser,
   ) {
     return this.sellers.reject(id, admin.id, dto.reason);
+  }
+
+  @Post(':id/suspend')
+  @HttpCode(HttpStatus.OK)
+  async suspend(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: RejectDto,
+    @CurrentUser() admin: AuthenticatedUser,
+  ) {
+    return this.sellers.suspend(id, admin.id, dto.reason);
+  }
+
+  @Post(':id/reinstate')
+  @HttpCode(HttpStatus.OK)
+  async reinstate(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() admin: AuthenticatedUser,
+  ) {
+    return this.sellers.reinstate(id, admin.id);
   }
 }

@@ -84,6 +84,76 @@ export class SellerService {
     });
   }
 
+  listAll(status?: SellerStatus) {
+    return this.prisma.seller.findMany({
+      where: status ? { status } : undefined,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        email: true,
+        businessName: true,
+        contactName: true,
+        phone: true,
+        taxId: true,
+        status: true,
+        approvedAt: true,
+        rejectionReason: true,
+        createdAt: true,
+        _count: { select: { products: true } },
+      },
+    });
+  }
+
+  /** APPROVED -> SUSPENDED. A suspended seller cannot sign in and leaves the catalogue. */
+  suspend(sellerId: string, adminId: string, reason: string) {
+    return this.moveStatus(sellerId, adminId, {
+      from: SellerStatus.APPROVED,
+      to: SellerStatus.SUSPENDED,
+      action: 'seller.suspend',
+      rejectionReason: reason.trim(),
+    });
+  }
+
+  /** SUSPENDED -> APPROVED. */
+  reinstate(sellerId: string, adminId: string) {
+    return this.moveStatus(sellerId, adminId, {
+      from: SellerStatus.SUSPENDED,
+      to: SellerStatus.APPROVED,
+      action: 'seller.reinstate',
+      rejectionReason: null,
+    });
+  }
+
+  private async moveStatus(
+    sellerId: string,
+    adminId: string,
+    move: {
+      from: SellerStatus;
+      to: SellerStatus;
+      action: string;
+      rejectionReason: string | null;
+    },
+  ): Promise<{ id: string; status: SellerStatus }> {
+    const seller = await this.requireSeller(sellerId);
+    const claimed = await this.prisma.seller.updateMany({
+      where: { id: sellerId, status: move.from },
+      data: { status: move.to, rejectionReason: move.rejectionReason },
+    });
+    if (claimed.count === 0) {
+      throw new BadRequestException(`Cannot change a ${seller.status} seller to ${move.to}`);
+    }
+    await this.audit.record({
+      actorType: 'ADMIN',
+      actorId: adminId,
+      action: move.action,
+      targetType: 'Seller',
+      targetId: sellerId,
+      metadata: { previousStatus: move.from, reason: move.rejectionReason },
+    });
+    this.logger.log(`Seller ${sellerId} ${move.to} by admin ${adminId}`);
+    return { id: sellerId, status: move.to };
+  }
+
   async approve(sellerId: string, adminId: string): Promise<{ id: string; status: SellerStatus }> {
     const seller = await this.requireSeller(sellerId);
     if (seller.status !== SellerStatus.PENDING) {
