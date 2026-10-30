@@ -1,5 +1,14 @@
 import { Transform, Type } from 'class-transformer';
-import { IsNumber, IsString, MaxLength, Min, MinLength } from 'class-validator';
+import {
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+  MinLength,
+  ValidateIf,
+} from 'class-validator';
 
 export class CreateVariantDto {
   @IsString()
@@ -25,8 +34,15 @@ export class CreateVariantDto {
   @Min(0.01)
   price!: number;
 
+  // The admin console sends unitWeightG instead
+  @ValidateIf((dto: CreateVariantDto) => dto.unitWeightG === undefined)
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 0 })
   @Min(1)
   unitWeightGrams!: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  unitWeightG?: number;
 }

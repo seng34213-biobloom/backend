@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { BatchStatus } from '@prisma/client';
+import { BatchStatus, Prisma, SellerStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
 import type { ListProductsQueryDto } from './dto/list-products-query.dto';
@@ -12,6 +12,9 @@ export interface ProductListItem {
   category: string;
   basePrice: string;
   unitWeightGrams: number;
+  ingredients: string | null;
+  allergens: string | null;
+  images: Array<{ id: string; url: string; altText: string }>;
   // Null for products managed directly by Bio Bloom admins
   seller: { id: string; businessName: string } | null;
   variants: Array<{
@@ -25,6 +28,16 @@ export interface ProductListItem {
 }
 
 const sellerSelect = { select: { id: true, businessName: true } } as const;
+
+const imagesSelect = {
+  orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }],
+  select: { id: true, url: true, altText: true },
+};
+
+/** In-house products, or products of a seller who has not been suspended. */
+const sellerVisible: Prisma.ProductWhereInput = {
+  OR: [{ sellerId: null }, { seller: { status: SellerStatus.APPROVED } }],
+};
 
 function startOfTodayUtc(): Date {
   const d = new Date();
@@ -54,6 +67,7 @@ export class ProductsService {
     const today = startOfTodayUtc();
     const where = {
       active: true,
+      AND: [sellerVisible],
       ...(query.category ? { category: query.category } : {}),
       ...(query.search
         ? {
@@ -86,6 +100,7 @@ export class ProductsService {
         take: query.pageSize,
         include: {
           seller: sellerSelect,
+          images: imagesSelect,
           variants: {
             where: { active: true },
             orderBy: { unitWeightGrams: 'asc' },
@@ -103,6 +118,9 @@ export class ProductsService {
         category: p.category,
         basePrice: p.basePrice.toString(),
         unitWeightGrams: p.unitWeightGrams,
+        ingredients: p.ingredients,
+        allergens: p.allergens,
+        images: p.images,
         seller: p.seller,
         variants: p.variants.map((v) => ({
           id: v.id,
@@ -128,14 +146,16 @@ export class ProductsService {
     const product = await this.prisma.product.findUnique({
       where: { slug },
       include: {
-        seller: sellerSelect,
+        seller: { select: { id: true, businessName: true, status: true } },
+        images: imagesSelect,
         variants: {
           where: { active: true },
           orderBy: { unitWeightGrams: 'asc' },
         },
       },
     });
-    if (!product || !product.active) {
+    const hidden = product?.seller && product.seller.status !== SellerStatus.APPROVED;
+    if (!product || !product.active || hidden) {
       throw new NotFoundException(`Product ${slug} not found`);
     }
 
@@ -167,7 +187,12 @@ export class ProductsService {
       category: product.category,
       basePrice: product.basePrice.toString(),
       unitWeightGrams: product.unitWeightGrams,
-      seller: product.seller,
+      ingredients: product.ingredients,
+      allergens: product.allergens,
+      images: product.images,
+      seller: product.seller
+        ? { id: product.seller.id, businessName: product.seller.businessName }
+        : null,
       variants: product.variants.map((v) => ({
         id: v.id,
         sku: v.sku,
