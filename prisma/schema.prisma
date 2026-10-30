@@ -33,6 +33,11 @@ enum AdminRole {
   FULFILMENT_STAFF
 }
 
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
 enum SellerStatus {
   PENDING
   APPROVED
@@ -169,6 +174,7 @@ model Seller {
   updatedAt         DateTime     @updatedAt @map("updated_at")
 
   products Product[]
+  bundles  Bundle[]
 
   @@index([status])
   @@map("seller")
@@ -223,17 +229,35 @@ model Product {
   // Default unit weight; each variant also stores its own weight for shipping
   unitWeightGrams Int      @map("unit_weight_grams")
   category        String
+  ingredients     String?
+  allergens       String?
   active          Boolean  @default(true)
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   seller   Seller?          @relation(fields: [sellerId], references: [id], onDelete: Restrict)
   variants ProductVariant[]
+  images   ProductImage[]
   reviews  ProductReview[]
 
   @@index([sellerId])
   @@index([category, active])
   @@map("product")
+}
+
+// SDS §6.2 product gallery; files are uploaded through presigned URLs and verified
+model ProductImage {
+  id        String   @id @default(uuid()) @db.Uuid
+  productId String   @map("product_id") @db.Uuid
+  url       String
+  altText   String   @default("") @map("alt_text")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, sortOrder])
+  @@map("product_image")
 }
 
 model ProductVariant {
@@ -254,6 +278,7 @@ model ProductVariant {
   subscriptions Subscription[]
   cartItems     CartItem[]
   orderItems    OrderItem[]
+  bundleItems   BundleItem[]
 
   @@index([productId])
   @@map("product_variant")
@@ -329,6 +354,8 @@ model CartItem {
 
 model Order {
   id                String        @id @default(uuid()) @db.Uuid
+  // Human-readable number shown to customers and staff (BB-000123)
+  orderNumber       Int           @unique @default(autoincrement()) @map("order_number")
   customerId        String        @map("customer_id") @db.Uuid
   shippingAddressId String        @map("shipping_address_id") @db.Uuid
   status            OrderStatus   @default(PENDING_PAYMENT)
@@ -341,6 +368,7 @@ model Order {
   shippedAt         DateTime?     @map("shipped_at")
   deliveredAt       DateTime?     @map("delivered_at")
   cancelledAt       DateTime?     @map("cancelled_at")
+  cancellationReason String?      @map("cancellation_reason")
   notes             String?
   createdAt         DateTime      @default(now()) @map("created_at")
   updatedAt         DateTime      @updatedAt @map("updated_at")
@@ -396,6 +424,58 @@ model OrderItem {
 
   @@index([orderId])
   @@map("order_item")
+}
+
+// Gift box: a fixed set of variants sold at one price
+model Bundle {
+  id           String   @id @default(uuid()) @db.Uuid
+  sellerId     String   @map("seller_id") @db.Uuid
+  name         String
+  slug         String   @unique
+  description  String
+  price        Decimal  @db.Decimal(12, 2)
+  totalWeightG Int      @map("total_weight_g")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  seller Seller       @relation(fields: [sellerId], references: [id], onDelete: Restrict)
+  items  BundleItem[]
+
+  @@index([sellerId])
+  @@map("bundle")
+}
+
+model BundleItem {
+  id               String @id @default(uuid()) @db.Uuid
+  bundleId         String @map("bundle_id") @db.Uuid
+  productVariantId String @map("product_variant_id") @db.Uuid
+  quantity         Int
+
+  bundle  Bundle         @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  variant ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
+
+  @@unique([bundleId, productVariantId])
+  @@map("bundle_item")
+}
+
+// SDS §6.3 discount codes
+model PromoCode {
+  id            String       @id @default(uuid()) @db.Uuid
+  code          String       @unique
+  description   String?
+  discountType  DiscountType @map("discount_type")
+  discountValue Decimal      @map("discount_value") @db.Decimal(12, 2)
+  minOrderLkr   Decimal?     @map("min_order_lkr") @db.Decimal(12, 2)
+  validFrom     DateTime     @map("valid_from")
+  validUntil    DateTime     @map("valid_until")
+  maxUses       Int?         @map("max_uses")
+  usedCount     Int          @default(0) @map("used_count")
+  active        Boolean      @default(true)
+  createdAt     DateTime     @default(now()) @map("created_at")
+
+  @@index([code, active])
+  @@map("promo_code")
 }
 
 model ShippingRate {
