@@ -19,6 +19,7 @@ import { OrderStatusService } from '../orders/order-status.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AssignDeliveryDto } from './dto/assign-delivery.dto';
 import type { RegisterFcmTokenDto } from './dto/fcm-token.dto';
+import type { ListAssignmentsQueryDto } from './dto/list-assignments.dto';
 import type { UpdateDeliveryStatusDto } from './dto/update-status.dto';
 import type { UploadDeliveryProofDto } from './dto/upload-proof.dto';
 
@@ -95,6 +96,20 @@ export class DeliveryService {
       deliveryUserId: rider.id,
     });
     return assignment;
+  }
+
+  listForAdmin(filters: ListAssignmentsQueryDto) {
+    return this.prisma.deliveryAssignment.findMany({
+      where: {
+        ...(filters.status ? { status: filters.status } : {}),
+        ...(filters.deliveryUserId ? { deliveryUserId: filters.deliveryUserId } : {}),
+      },
+      orderBy: { assignedAt: 'desc' },
+      include: {
+        order: { select: { id: true, orderNumber: true, status: true } },
+        deliveryUser: { select: { id: true, name: true, phone: true } },
+      },
+    });
   }
 
   listForRider(deliveryUserId: string) {

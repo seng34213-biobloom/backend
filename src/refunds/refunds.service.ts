@@ -75,7 +75,7 @@ export class RefundsService {
       orderBy: { createdAt: 'desc' },
       include: {
         customer: { select: { id: true, email: true, name: true } },
-        order: { select: { id: true, status: true, totalAmount: true } },
+        order: { select: { id: true, orderNumber: true, status: true, totalAmount: true } },
       },
     });
   }

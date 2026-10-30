@@ -8,13 +8,14 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../auth/types/auth.types';
-import { CreateReviewDto } from './dto/create-review.dto';
+import { CreateReviewDto, SubmitReviewDto } from './dto/create-review.dto';
 import { ReviewsService } from './reviews.service';
 
 @Controller()
@@ -44,6 +45,21 @@ export class ReviewsController {
     return this.reviews.create(productId, customer.id, dto);
   }
 
+  @Roles(Role.CUSTOMER)
+  @Post('reviews')
+  @HttpCode(HttpStatus.CREATED)
+  createFromBody(@Body() dto: SubmitReviewDto, @CurrentUser() customer: AuthenticatedUser) {
+    return this.reviews.create(dto.productId, customer.id, dto);
+  }
+
+  @Roles(Role.ADMIN)
+  @Get('admin/reviews')
+  listAdmin(@Query('approved') approved?: string) {
+    return this.reviews.listForAdmin(
+      approved === 'true' ? true : approved === 'false' ? false : undefined,
+    );
+  }
+
   @Roles(Role.ADMIN)
   @Get('admin/reviews/pending')
   pending() {
@@ -58,6 +74,16 @@ export class ReviewsController {
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     return this.reviews.approve(id, actor);
+  }
+
+  @Roles(Role.ADMIN)
+  @Post('admin/reviews/:id/reject')
+  @HttpCode(HttpStatus.OK)
+  remove(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.reviews.remove(id, actor);
   }
 
   @Roles(Role.ADMIN)

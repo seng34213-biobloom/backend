@@ -1,5 +1,7 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  IsBoolean,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -45,9 +47,29 @@ export class UpdateProductDto {
   @Min(0.01)
   basePrice?: number;
 
+  // The admin console sends unitWeightG instead
   @IsOptional()
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 0 })
   @Min(1)
   unitWeightGrams?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  unitWeightG?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  ingredients?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  allergens?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
 }

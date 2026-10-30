@@ -3,6 +3,7 @@ import { Prisma, Role } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../auth/types/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { UploadsService } from '../uploads/uploads.service';
 import { ProductsAdminService } from './products-admin.service';
 
 const admin = { id: 'admin-1', role: Role.ADMIN } as AuthenticatedUser;
@@ -59,12 +60,13 @@ describe('ProductsAdminService', () => {
         update: jest.fn().mockResolvedValue({ id: 'variant-1' }),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
+      productBatch: { groupBy: jest.fn().mockResolvedValue([]) },
       $transaction: jest.fn(async (work: (tx: PrismaService) => Promise<unknown>) => work(prisma)),
     } as unknown as jest.Mocked<PrismaService>;
     audit = {
       record: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<AuditService>;
-    service = new ProductsAdminService(prisma, audit);
+    service = new ProductsAdminService(prisma, audit, {} as UploadsService);
   });
 
   it('creates the product and initial variants under the authenticated seller', async () => {

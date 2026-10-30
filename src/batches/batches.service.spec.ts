@@ -140,13 +140,38 @@ describe('BatchesService', () => {
 
   describe('listForProduct', () => {
     it('lists batches earliest-expiry first with the batch number as tie-break', async () => {
-      (prisma.product.findUnique as jest.Mock).mockResolvedValue({ id: 'p-1', sellerId: null });
+      (prisma.product.findUnique as jest.Mock).mockResolvedValue({
+        id: 'p-1',
+        sellerId: null,
+        variants: [],
+      });
 
       await svc.listForProduct('p-1', admin);
 
       const args = (prisma.productBatch.findMany as jest.Mock).mock.calls[0][0];
       expect(args.where).toEqual({ variant: { productId: 'p-1' } });
       expect(args.orderBy).toEqual([{ expiryDate: 'asc' }, { batchNumber: 'asc' }]);
+    });
+
+    it.each([
+      [1, 'ACTIVE', 'EXPIRING_SOON'],
+      [-1, 'ACTIVE', 'EXPIRED'],
+      [30, 'ACTIVE', 'ACTIVE'],
+      [-1, 'DEPLETED', 'DEPLETED'],
+    ])('shows a batch %i days from expiry as of today %#', async (days, status, shown) => {
+      const expiryDate = new Date();
+      expiryDate.setUTCHours(0, 0, 0, 0);
+      expiryDate.setUTCDate(expiryDate.getUTCDate() + days);
+      (prisma.product.findUnique as jest.Mock).mockResolvedValue({
+        id: 'p-1',
+        sellerId: null,
+        variants: [],
+      });
+      (prisma.productBatch.findMany as jest.Mock).mockResolvedValue([{ status, expiryDate }]);
+
+      const out = await svc.listForProduct('p-1', admin);
+
+      expect(out.batches[0]).toMatchObject({ displayStatus: shown, daysUntilExpiry: days });
     });
 
     it('returns 404 for an unknown product', async () => {
@@ -158,8 +183,15 @@ describe('BatchesService', () => {
       (prisma.product.findUnique as jest.Mock).mockResolvedValue({
         id: 'p-1',
         sellerId: 'seller-1',
+        name: 'Jam',
+        slug: 'jam',
+        active: true,
+        variants: [],
       });
-      await expect(svc.listForProduct('p-1', seller)).resolves.toEqual([]);
+      await expect(svc.listForProduct('p-1', seller)).resolves.toMatchObject({
+        variants: [],
+        batches: [],
+      });
 
       (prisma.product.findUnique as jest.Mock).mockResolvedValue({ id: 'p-2', sellerId: null });
       await expect(svc.listForProduct('p-2', seller)).rejects.toBeInstanceOf(ForbiddenException);

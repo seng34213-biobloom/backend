@@ -2,12 +2,14 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   HttpCode,
   HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -15,6 +17,8 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../auth/types/auth.types';
 import { CreateProductDto } from './dto/create-product.dto';
 import { CreateVariantDto } from './dto/create-variant.dto';
+import { ListAdminProductsQueryDto } from './dto/list-admin-products-query.dto';
+import { AddProductImageDto } from './dto/product-image.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateVariantDto } from './dto/update-variant.dto';
 import { ProductsAdminService } from './products-admin.service';
@@ -23,6 +27,19 @@ import { ProductsAdminService } from './products-admin.service';
 @Roles(Role.ADMIN, Role.SELLER)
 export class ProductsAdminController {
   constructor(private readonly products: ProductsAdminService) {}
+
+  @Get()
+  list(@Query() query: ListAdminProductsQueryDto, @CurrentUser() actor: AuthenticatedUser) {
+    return this.products.list(query, actor);
+  }
+
+  @Get(':productId')
+  get(
+    @Param('productId', new ParseUUIDPipe({ version: '4' })) productId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.products.get(productId, actor);
+  }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -37,6 +54,25 @@ export class ProductsAdminController {
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     return this.products.updateProduct(productId, dto, actor);
+  }
+
+  @Post(':productId/images')
+  @HttpCode(HttpStatus.CREATED)
+  addImage(
+    @Param('productId', new ParseUUIDPipe({ version: '4' })) productId: string,
+    @Body() dto: AddProductImageDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.products.addImage(productId, dto, actor);
+  }
+
+  @Delete(':productId/images/:imageId')
+  removeImage(
+    @Param('productId', new ParseUUIDPipe({ version: '4' })) productId: string,
+    @Param('imageId', new ParseUUIDPipe({ version: '4' })) imageId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.products.removeImage(productId, imageId, actor);
   }
 
   @Post(':productId/variants')

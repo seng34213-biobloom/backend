@@ -122,13 +122,22 @@ describe('ProductsService', () => {
       await expect(svc.getBySlug('missing')).rejects.toBeInstanceOf(NotFoundException);
     });
 
+    it('throws NotFoundException while the seller is suspended', async () => {
+      (prisma.product.findUnique as jest.Mock).mockResolvedValue(
+        productRow({ seller: { id: 's1', businessName: 'Highland Jars', status: 'SUSPENDED' } }),
+      );
+      await expect(svc.getBySlug('wild-honey')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
     it('throws NotFoundException for an inactive product', async () => {
       (prisma.product.findUnique as jest.Mock).mockResolvedValue(productRow({ active: false }));
       await expect(svc.getBySlug('wild-honey')).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('returns live stock and earliest expiry per variant, 0 and null when unsellable', async () => {
-      (prisma.product.findUnique as jest.Mock).mockResolvedValue(productRow());
+      (prisma.product.findUnique as jest.Mock).mockResolvedValue(
+        productRow({ seller: { id: 's1', businessName: 'Highland Jars', status: 'APPROVED' } }),
+      );
       (inventory.availableStock as jest.Mock).mockImplementation(async (variantId: string) =>
         variantId === 'v-small' ? 12 : 0,
       );

@@ -14,6 +14,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/types/auth.types';
 
@@ -153,6 +154,58 @@ export class UploadsService {
       contentType: signature.contentType,
       size: metadata.ContentLength,
     };
+  }
+
+  /** Presigned PUT for a product image; the browser uploads straight to the bucket. */
+  async presignProductImage(productId: string, contentType: string, sizeBytes: number) {
+    if (!ALLOWED_TYPES.has(contentType)) {
+      throw new UnsupportedMediaTypeException('Only JPEG, PNG, and WebP images are accepted');
+    }
+    if (sizeBytes > MAX_UPLOAD_BYTES) {
+      throw new PayloadTooLargeException('Images must be 5 MB or smaller');
+    }
+    const bucket = this.bucket();
+    const extension = IMAGE_SIGNATURES.find((s) => s.contentType === contentType)?.extension;
+    const key = `products/${productId}/${randomUUID()}.${extension}`;
+    const uploadUrl = await getSignedUrl(
+      this.getClient(),
+      new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: contentType }),
+      { expiresIn: 300 },
+    );
+    return { uploadUrl, fileUrl: `${this.publicBaseUrl(bucket)}/${key}`, key };
+  }
+
+  /** SDS §7.4: rejects anything outside the bucket and deletes files that are not images. */
+  async verifyProductImage(fileUrl: string): Promise<{ key: string }> {
+    const bucket = this.bucket();
+    const prefix = `${this.publicBaseUrl(bucket)}/products/`;
+    if (!fileUrl.startsWith(prefix)) {
+      throw new BadRequestException('Image URL does not belong to the upload bucket');
+    }
+    const key = fileUrl.slice(prefix.length - 'products/'.length);
+    const client = this.getClient();
+    let bytes: Uint8Array | undefined;
+    try {
+      const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+      bytes = await object.Body?.transformToByteArray();
+    } catch {
+      throw new BadRequestException('Uploaded object was not found');
+    }
+    if (!bytes || bytes.byteLength < 1 || bytes.byteLength > MAX_UPLOAD_BYTES) {
+      await this.deleteObject(bucket, key);
+      throw new PayloadTooLargeException('Images must be between 1 byte and 5 MB');
+    }
+    if (!IMAGE_SIGNATURES.some((candidate) => candidate.matches(bytes))) {
+      await this.deleteObject(bucket, key);
+      throw new UnsupportedMediaTypeException('Uploaded file content is not a supported image');
+    }
+    return { key };
+  }
+
+  private publicBaseUrl(bucket: string): string {
+    const configured = this.config.get<string>('UPLOADS_PUBLIC_BASE_URL');
+    if (configured) return configured.replace(/\/$/, '');
+    return `https://${bucket}.s3.${this.config.get<string>('AWS_REGION')}.amazonaws.com`;
   }
 
   private quarantineKey(user: AuthenticatedUser, uploadId: string): string {
