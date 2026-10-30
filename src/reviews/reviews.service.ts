@@ -102,6 +102,21 @@ export class ReviewsService {
     };
   }
 
+  async listForAdmin(approved?: boolean) {
+    const rows = await this.prisma.productReview.findMany({
+      where:
+        approved === undefined
+          ? undefined
+          : { status: approved ? ReviewStatus.APPROVED : ReviewStatus.PENDING },
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      include: {
+        customer: { select: { id: true, name: true, email: true } },
+        product: { select: { id: true, name: true, slug: true } },
+      },
+    });
+    return rows.map((row) => ({ ...row, approved: row.status === ReviewStatus.APPROVED }));
+  }
+
   listPending() {
     return this.prisma.productReview.findMany({
       where: { status: ReviewStatus.PENDING },
@@ -158,6 +173,25 @@ export class ReviewsService {
       targetType: 'ProductReview',
       targetId: reviewId,
       metadata: { productId: review.productId, customerId: review.customerId },
+    });
+    return { deleted: true, reviewId };
+  }
+
+  /** Takes down a review in either state; used by the moderation screen. */
+  async remove(reviewId: string, actor: AuthenticatedUser) {
+    const review = await this.requireReview(reviewId);
+    await this.prisma.productReview.delete({ where: { id: reviewId } });
+    await this.audit.record({
+      actorType: AuditActorType.ADMIN,
+      actorId: actor.id,
+      action: 'review.reject',
+      targetType: 'ProductReview',
+      targetId: reviewId,
+      metadata: {
+        productId: review.productId,
+        customerId: review.customerId,
+        status: review.status,
+      },
     });
     return { deleted: true, reviewId };
   }

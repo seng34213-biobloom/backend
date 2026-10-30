@@ -61,6 +61,26 @@ export class SupportController {
   }
 
   @Roles(Role.ADMIN)
+  @Post('admin/support/tickets/:id/resolve')
+  @HttpCode(HttpStatus.OK)
+  resolve(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.support.updateStatus(id, { status: SupportTicketStatus.RESOLVED }, actor);
+  }
+
+  @Roles(Role.ADMIN)
+  @Post('admin/support/tickets/:id/close')
+  @HttpCode(HttpStatus.OK)
+  close(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.support.updateStatus(id, { status: SupportTicketStatus.CLOSED }, actor);
+  }
+
+  @Roles(Role.ADMIN)
   @Patch('admin/support/tickets/:id/status')
   updateStatus(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
