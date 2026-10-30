@@ -11,6 +11,7 @@ import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 import { BatchesModule } from './batches/batches.module';
+import { BundlesModule } from './bundles/bundles.module';
 import { CartModule } from './cart/cart.module';
 import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
 import { CsrfMiddleware } from './common/middleware/csrf.middleware';
@@ -23,8 +24,10 @@ import { OrdersModule } from './orders/orders.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
+import { PromoCodesModule } from './promo-codes/promo-codes.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { ShippingModule } from './shipping/shipping.module';
+import { StaffModule } from './staff/staff.module';
 import { RedisModule } from './redis/redis.module';
 import { RefundsModule } from './refunds/refunds.module';
 import { SellerModule } from './sellers/seller.module';
@@ -82,6 +85,9 @@ function limitFrom(config: ConfigService, key: string, fallback: number): number
     NotificationsModule,
     InventoryModule,
     ProductsModule,
+    BundlesModule,
+    PromoCodesModule,
+    StaffModule,
     BatchesModule,
     CartModule,
     DeliveryModule,
