@@ -14,6 +14,7 @@ import { PaymentIntent, PaymentsService } from '../payments/payments.service';
 export interface CheckoutResult {
   order: {
     id: string;
+    orderNumber: number;
     status: OrderStatus;
     totalAmount: string;
     totalWeightG: number;
@@ -72,6 +73,7 @@ export class OrdersService {
       include: { variant: true },
     });
     this.assertCartAvailable(initialCart);
+    await this.payments.assertCheckoutAvailable(gateway, customerId);
 
     const order = await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw<Array<{ id: string }>>(
@@ -145,6 +147,7 @@ export class OrdersService {
     return {
       order: {
         id: order.created.id,
+        orderNumber: order.created.orderNumber,
         status: order.created.status,
         totalAmount: formatCents(moneyToCents(order.created.totalAmount)),
         totalWeightG: order.shippingQuote.totalWeightG,
@@ -192,27 +195,97 @@ export class OrdersService {
       where: { id: orderId },
       include: {
         items: {
-          include: { variant: { select: { name: true, size: true, sku: true } } },
+          include: {
+            variant: {
+              select: { name: true, size: true, sku: true, product: { select: { name: true } } },
+            },
+          },
         },
-        payments: true,
+        payments: { orderBy: { createdAt: 'asc' } },
+        refundRequests: { orderBy: { createdAt: 'desc' } },
+        deliveryAssignment: { include: { deliveryUser: { select: { name: true } } } },
         shippingAddress: true,
       },
     });
     if (!order) throw new NotFoundException(`Order ${orderId} not found`);
     if (order.customerId !== customerId) throw new ForbiddenException('Not your order');
-    return order;
+
+    const subtotalCents = order.items.reduce((sum, item) => sum + moneyToCents(item.lineTotal), 0);
+    const delivery = order.deliveryAssignment;
+    return {
+      id: order.id,
+      orderNumber: order.orderNumber,
+      status: order.status,
+      paymentStatus: order.paymentStatus,
+      subtotal: formatCents(subtotalCents),
+      discountAmount: '0.00',
+      shippingFee: formatCents(moneyToCents(order.shippingFee)),
+      totalAmount: formatCents(moneyToCents(order.totalAmount)),
+      totalWeightG: Number(order.totalWeight),
+      currency: order.currency,
+      placedAt: order.placedAt,
+      shippedAt: order.shippedAt,
+      deliveredAt: order.deliveredAt,
+      cancelledAt: order.cancelledAt,
+      cancellationReason: order.cancellationReason,
+      shippingAddress: order.shippingAddress,
+      items: order.items.map((item) => ({
+        id: item.id,
+        productVariantId: item.productVariantId,
+        batchId: item.batchId,
+        productName: item.variant.product.name,
+        variantName: item.variant.name,
+        size: item.variant.size,
+        sku: item.variant.sku,
+        quantity: item.quantity,
+        unitPriceSnapshot: formatCents(moneyToCents(item.unitPriceSnapshot)),
+        lineTotal: formatCents(moneyToCents(item.lineTotal)),
+      })),
+      payments: order.payments.map((payment) => ({
+        id: payment.id,
+        gateway: payment.gateway,
+        status: payment.status,
+        amount: formatCents(moneyToCents(payment.amount)),
+        refundedAmount:
+          payment.status === PaymentStatus.REFUNDED
+            ? formatCents(moneyToCents(payment.amount))
+            : '0.00',
+      })),
+      refundRequests: order.refundRequests.map((refund) => ({
+        id: refund.id,
+        orderId: refund.orderId,
+        amount: formatCents(moneyToCents(refund.amount)),
+        reason: refund.reason,
+        status: refund.status,
+        createdAt: refund.createdAt,
+        processedAt: refund.processedAt,
+      })),
+      delivery: delivery
+        ? {
+            status: delivery.status,
+            assignedAt: delivery.assignedAt,
+            pickedUpAt: delivery.pickedUpAt,
+            deliveredAt: delivery.deliveredAt,
+            riderName: delivery.deliveryUser.name,
+          }
+        : null,
+    };
   }
 
-  listForCustomer(customerId: string) {
-    return this.prisma.order.findMany({
+  async listForCustomer(customerId: string) {
+    const orders = await this.prisma.order.findMany({
       where: { customerId },
       orderBy: { placedAt: 'desc' },
-      include: {
-        items: {
-          include: { variant: { select: { name: true, size: true, sku: true } } },
-        },
-      },
+      include: { _count: { select: { items: true } } },
     });
+    return orders.map((order) => ({
+      id: order.id,
+      orderNumber: order.orderNumber,
+      placedAt: order.placedAt,
+      status: order.status,
+      totalAmount: formatCents(moneyToCents(order.totalAmount)),
+      itemCount: order._count.items,
+    }));
   }
 
   private assertCartAvailable(
