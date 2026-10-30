@@ -12,13 +12,17 @@ import { PaymentGateway, Role } from '@prisma/client';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../auth/types/auth.types';
+import { AdminOrdersService } from './admin-orders.service';
 import { CheckoutDto } from './dto/checkout.dto';
 import { OrdersService } from './orders.service';
 
 @Controller()
 @Roles(Role.CUSTOMER)
 export class OrdersController {
-  constructor(private readonly orders: OrdersService) {}
+  constructor(
+    private readonly orders: OrdersService,
+    private readonly adminOrders: AdminOrdersService,
+  ) {}
 
   @Get('checkout/quote')
   quote(@CurrentUser() user: AuthenticatedUser) {
@@ -45,6 +49,16 @@ export class OrdersController {
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    return this.orders.getOrder(user.id, id);
+  }
+
+  @Post('orders/:id/cancel')
+  @HttpCode(HttpStatus.OK)
+  async cancel(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.adminOrders.cancelUnpaid(id, user);
     return this.orders.getOrder(user.id, id);
   }
 }
