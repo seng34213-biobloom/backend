@@ -8,9 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Admin console API: order list, detail and cancellation with refund and restock, rider and staff accounts, delivery assignment list, shipping rate brackets, promo codes, gift box bundles, product list, detail and image gallery, seller list, suspension and reinstatement, subscription oversight, and review and ticket moderation actions (#72)
-- Public `GET /api/bundles` and `GET /api/bundles/:slug`, customer `POST /api/orders/:id/cancel` for unpaid orders, and `POST /api/reviews` (#72)
-- Human-readable `orderNumber` on every order, plus product `ingredients`, `allergens` and `images` in the catalogue (#72)
+- Contributing guide, pull request template with the Definition of Done, CODEOWNERS, and the architecture decision records ADR-001 to ADR-013 in `docs/adr/` (#70)
 - Unpaid checkouts are cancelled after `PENDING_ORDER_TIMEOUT_MINUTES` (30 by default): the payment fails, the units go back to unexpired batches and a SYSTEM audit entry is written; a payment that succeeds after its order was cancelled is refunded (#64)
 - k6 load tests in `load-test/`: checkout at 50 concurrent shoppers (p95 under 600 ms, under 1% failures) and one billing run over 200 due subscriptions (under 60 s), with a fixture and an admin-only billing trigger that production builds do not expose; the rate limits are configurable through `THROTTLE_*` for test environments (#68)
 - Daily Subscribe & Save billing at 06:00 UTC: each due active subscription is charged the discounted price plus shipping on its stored token, and a paid renewal becomes a `PAID` order with FIFO stock; short stock or a declined charge creates no order and takes no stock, and the billing date always moves one interval forward (#15)
