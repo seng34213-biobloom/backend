@@ -185,12 +185,15 @@ describe('Batch management (e2e)', () => {
       .get(`/api/admin/products/${ids.productA}/batches`)
       .expect(200);
 
-    expect(res.body.map((b: { batchNumber: string }) => b.batchNumber)).toEqual([
+    expect(res.body.batches.map((b: { batchNumber: string }) => b.batchNumber)).toEqual([
       'KT-A-TIE',
       'KT-EARLY',
       'KT-LATE',
     ]);
-    expect(res.body[0].variant).toMatchObject({ id: ids.variantA, size: '350 ml' });
+    expect(res.body.batches[0].variant).toMatchObject({ id: ids.variantA, size: '350 ml' });
+    expect(res.body.batches[0]).toMatchObject({ displayStatus: 'ACTIVE', daysUntilExpiry: 30 });
+    expect(res.body.product.id).toBe(ids.productA);
+    expect(res.body.variants.map((v: { id: string }) => v.id)).toContain(ids.variantA);
   });
 
   it('rejects date rule violations with 400', async () => {

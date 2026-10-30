@@ -10,12 +10,26 @@ import { BatchStatus, Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../auth/types/auth.types';
+import { stockByVariant } from '../products/catalogue.util';
 import type { CreateBatchDto } from './dto/create-batch.dto';
+
+const EXPIRY_ALERT_DAYS = 7;
 
 function startOfTodayUtc(): Date {
   const d = new Date();
   d.setUTCHours(0, 0, 0, 0);
   return d;
+}
+
+function daysBetween(from: Date, to: Date): number {
+  return Math.round((to.getTime() - from.getTime()) / 86_400_000);
+}
+
+/** The state a batch is in today, even if the daily sweep has not run yet. */
+function displayStatusFor(status: BatchStatus, expiryDate: Date, today: Date): BatchStatus {
+  if (status === BatchStatus.DEPLETED) return BatchStatus.DEPLETED;
+  if (expiryDate < today) return BatchStatus.EXPIRED;
+  return daysBetween(today, expiryDate) <= EXPIRY_ALERT_DAYS ? BatchStatus.EXPIRING_SOON : status;
 }
 
 @Injectable()
@@ -133,19 +147,56 @@ export class BatchesService {
   async listForProduct(productId: string, actor: AuthenticatedUser) {
     const product = await this.prisma.product.findUnique({
       where: { id: productId },
-      select: { id: true, sellerId: true, name: true },
+      select: {
+        id: true,
+        sellerId: true,
+        name: true,
+        slug: true,
+        active: true,
+        variants: {
+          orderBy: [{ unitWeightGrams: 'asc' }, { createdAt: 'asc' }],
+          select: { id: true, sku: true, name: true, size: true, active: true },
+        },
+      },
     });
     if (!product) throw new NotFoundException(`Product ${productId} not found`);
     if (actor.role === Role.SELLER && product.sellerId !== actor.id) {
       throw new ForbiddenException('Sellers can only view batches for their own products');
     }
 
-    return this.prisma.productBatch.findMany({
-      where: { variant: { productId } },
-      orderBy: [{ expiryDate: 'asc' }, { batchNumber: 'asc' }],
-      include: {
-        variant: { select: { id: true, sku: true, size: true, name: true } },
+    const today = startOfTodayUtc();
+    const [batches, stock] = await Promise.all([
+      this.prisma.productBatch.findMany({
+        where: { variant: { productId } },
+        orderBy: [{ expiryDate: 'asc' }, { batchNumber: 'asc' }],
+        include: {
+          variant: { select: { id: true, sku: true, size: true, name: true } },
+        },
+      }),
+      stockByVariant(
+        this.prisma,
+        product.variants.map((variant) => variant.id),
+        today,
+      ),
+    ]);
+
+    return {
+      product: {
+        id: product.id,
+        name: product.name,
+        slug: product.slug,
+        sellerId: product.sellerId,
+        active: product.active,
       },
-    });
+      variants: product.variants.map((variant) => ({
+        ...variant,
+        available: stock.get(variant.id)?.available ?? 0,
+      })),
+      batches: batches.map((batch) => ({
+        ...batch,
+        displayStatus: displayStatusFor(batch.status, batch.expiryDate, today),
+        daysUntilExpiry: daysBetween(today, batch.expiryDate),
+      })),
+    };
   }
 }
