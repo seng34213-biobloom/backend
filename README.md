@@ -4,14 +4,14 @@ Bio Bloom NestJS REST API and Core Domain Services
 
 ## Tech stack
 
-- NestJS 10 (TypeScript)
-- Prisma ORM with PostgreSQL 15
-- Jest and Supertest for tests
-- GitHub Actions for CI
+- NestJS 11 (TypeScript) on Node.js 22
+- Prisma 7 with PostgreSQL 15 and Redis 7
+- Jest and Supertest for tests, k6 for load tests
+- GitHub Actions for CI/CD, Docker image on GitHub Container Registry, staging on Render
 
 ## Getting started
 
-Requirements: Node.js 20 (see `.nvmrc`), npm and Docker.
+Requirements: Node.js 22 (see `.nvmrc`), npm and Docker.
 
 ```bash
 # 1. Install dependencies (also generates the Prisma client)
@@ -20,7 +20,7 @@ npm install
 # 2. Create your local env file
 cp .env.example .env
 
-# 3. Start PostgreSQL, Redis and MailHog
+# 3. Start PostgreSQL (host port 5433), Redis (6379) and MailHog (1025, UI on 8025)
 docker compose up -d
 
 # 4. Apply database migrations
@@ -74,6 +74,7 @@ prisma/
   migrations/       SQL migrations, applied in order
 test/               Integration tests
 load-test/          k6 load tests and their fixture, see load-test/README.md
+docs/adr/           Architecture decision records
 ```
 
 ## Data model
@@ -198,6 +199,8 @@ Staging runs on Render in Singapore: the `biobloom-api` web service, Render Post
 - Render runs the API with `NODE_ENV=production`, so the production secret checks apply. Staging sets `APP_ENV=staging`, which allows Stripe test keys (`sk_test_…`) and starts without `AWS_REGION` and `UPLOADS_BUCKET`; proof uploads answer 503 until those are set. `JWT_SECRET` (32+ characters), `SUBSCRIPTION_TOKEN_ENC_KEY` (16+), `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` are still required, and none may contain a placeholder such as `change-me`, `dev-` or `example`.
 - Staging uses free instances, which sleep after 15 minutes without traffic. The first request after that takes up to a minute, and the 06:00 UTC expiry sweep only runs while the instance is awake.
 
-## Branching
+## Contributing
 
-Work happens on short-lived branches cut from `develop`, and changes reach `develop` through a pull request with one approval. `main` is updated from `develop` for releases.
+Work happens on short-lived branches cut from `develop`, and changes reach `develop` through a pull request with one approval and a green CI run. `main` is updated from `develop` for releases. [CONTRIBUTING.md](CONTRIBUTING.md) covers branch names, commit messages, the checks to run before pushing and the Definition of Done; the pull request template fills in the rest.
+
+The architecture decisions behind the code, including where it differs from the SDS, are recorded in [docs/adr/](docs/adr/README.md).
