@@ -1,3 +1,4 @@
+import { ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PaymentGateway } from '@prisma/client';
 import { createHmac } from 'node:crypto';
@@ -101,6 +102,109 @@ describe('StripeGateway', () => {
     });
   });
 
+  describe('card setup', () => {
+    const input = {
+      setupId: 'setup-1',
+      customer: { id: 'cust-1', email: 'ada@example.com', name: 'Ada' },
+      returnUrl: 'https://shop.example/checkout?subscribe=1',
+    };
+    const setupSession = {
+      mode: 'setup',
+      status: 'complete',
+      customer: 'cus_1',
+      metadata: { customerId: 'cust-1' },
+      setup_intent: { status: 'succeeded', payment_method: 'pm_1' },
+    };
+    const withClient = (client: unknown) => {
+      const gateway = new StripeGateway(config);
+      jest.spyOn(gateway as unknown as { client: () => unknown }, 'client').mockReturnValue(client);
+      return gateway;
+    };
+    const retrieving = (session: unknown, setupIntents?: unknown) =>
+      withClient({
+        checkout: { sessions: { retrieve: jest.fn().mockResolvedValue(session) } },
+        setupIntents,
+      });
+
+    it('opens a setup session that charges nothing and returns to the storefront', async () => {
+      const create = jest.fn().mockResolvedValue({ id: 'cs_1', url: 'https://stripe/cs_1' });
+      const customers = { create: jest.fn().mockResolvedValue({ id: 'cus_1' }) };
+
+      await expect(
+        withClient({ customers, checkout: { sessions: { create } } }).createSetupSession(input),
+      ).resolves.toEqual({ id: 'cs_1', url: 'https://stripe/cs_1' });
+
+      expect(customers.create).toHaveBeenCalledWith(
+        expect.objectContaining({ email: 'ada@example.com', name: 'Ada' }),
+        { idempotencyKey: 'setup-customer-setup-1' },
+      );
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: 'setup',
+          customer: 'cus_1',
+          allowed_payment_method_types: ['card'],
+          success_url:
+            'https://shop.example/checkout?subscribe=1&setup_session={CHECKOUT_SESSION_ID}',
+          cancel_url: input.returnUrl,
+          metadata: { customerId: 'cust-1', setupId: 'setup-1' },
+        }),
+        { idempotencyKey: 'setup-session-setup-1' },
+      );
+    });
+
+    it('fails when Stripe returns no setup page', async () => {
+      const gateway = withClient({
+        customers: { create: jest.fn().mockResolvedValue({ id: 'cus_1' }) },
+        checkout: { sessions: { create: jest.fn().mockResolvedValue({ id: 'cs_1', url: null }) } },
+      });
+      await expect(gateway.createSetupSession(input)).rejects.toThrow('setup URL');
+    });
+
+    it('turns a finished session into the stored token', async () => {
+      await expect(retrieving(setupSession).completeSetupSession('cs_1', 'cust-1')).resolves.toBe(
+        'cus_1:pm_1',
+      );
+    });
+
+    it('fetches the setup intent when it was not expanded', async () => {
+      const setupIntents = {
+        retrieve: jest
+          .fn()
+          .mockResolvedValue({ status: 'succeeded', payment_method: { id: 'pm_2' } }),
+      };
+      await expect(
+        retrieving({ ...setupSession, setup_intent: 'seti_1' }, setupIntents).completeSetupSession(
+          'cs_1',
+          'cust-1',
+        ),
+      ).resolves.toBe('cus_1:pm_2');
+    });
+
+    it("refuses another customer's session and a payment session", async () => {
+      await expect(
+        retrieving(setupSession).completeSetupSession('cs_1', 'cust-2'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        retrieving({ ...setupSession, mode: 'payment' }).completeSetupSession('cs_1', 'cust-1'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('refuses a session the customer abandoned', async () => {
+      await expect(
+        retrieving({ ...setupSession, status: 'open' }).completeSetupSession('cs_1', 'cust-1'),
+      ).rejects.toThrow('not been completed');
+    });
+
+    it('refuses a setup that did not succeed', async () => {
+      await expect(
+        retrieving({
+          ...setupSession,
+          setup_intent: { status: 'requires_action', payment_method: null },
+        }).completeSetupSession('cs_1', 'cust-1'),
+      ).rejects.toThrow('did not succeed');
+    });
+  });
+
   describe('checkout session webhooks', () => {
     const signed = (type: string, session: Record<string, unknown>) => {
       const body = Buffer.from(
@@ -128,6 +232,21 @@ describe('StripeGateway', () => {
       currency: 'lkr',
       metadata: { orderId: 'order-1' },
     };
+
+    it.each(['checkout.session.completed', 'checkout.session.expired'])(
+      'ignores %s for a card setup',
+      (type) => {
+        const { body, signature } = signed(type, {
+          mode: 'setup',
+          payment_status: 'no_payment_required',
+          amount_total: null,
+          currency: null,
+        });
+        expect(new StripeGateway(config).parseWebhook(body, signature)).toEqual({
+          type: 'ignored',
+        });
+      },
+    );
 
     it('reports a paid session', () => {
       const { body, signature } = signed('checkout.session.completed', paid);

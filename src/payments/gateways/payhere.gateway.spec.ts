@@ -119,6 +119,90 @@ describe('PayHereGateway', () => {
     expect(gateway.parseWebhook({ ...input, md5sig }).type).toBe('payment_failed');
   });
 
+  describe('card setup', () => {
+    const input = {
+      setupId: 'abc',
+      customer: { name: 'Ada Lovelace', email: 'ada@example.com', phone: '0771234567' },
+      address: { line1: '12 Temple Road', city: 'Kelaniya', country: 'LK' },
+      returnUrl: 'https://shop.example/checkout?subscribe=1',
+    };
+    const md5 = (value: string) => createHash('md5').update(value).digest('hex');
+    const notification = (status: string, extra: Record<string, string> = {}) => {
+      const fields = {
+        merchant_id: merchantId,
+        order_id: 'setup_abc',
+        payment_id: '320025023469',
+        payhere_amount: '0.00',
+        payhere_currency: 'LKR',
+        status_code: status,
+        ...extra,
+      };
+      const md5sig = md5(
+        `${merchantId}${fields.order_id}0.00LKR${status}${md5(merchantSecret).toUpperCase()}`,
+      ).toUpperCase();
+      return { ...fields, md5sig };
+    };
+
+    it('builds a signed preapproval form with nothing to pay', () => {
+      const { reference, checkoutUrl, params } = new PayHereGateway(config).createSetupCheckout(
+        input,
+      );
+
+      expect(reference).toBe('setup_abc');
+      expect(checkoutUrl).toBe('https://sandbox.payhere.lk/pay/preapprove');
+      expect(params).toMatchObject({
+        order_id: 'setup_abc',
+        amount: '0.00',
+        currency: 'LKR',
+        first_name: 'Ada',
+        last_name: 'Lovelace',
+        return_url: 'https://shop.example/checkout?subscribe=1&setup_session=setup_abc',
+        cancel_url: input.returnUrl,
+        notify_url: 'https://api.example/api/webhooks/payhere',
+      });
+      expect(params.hash).toBe(
+        md5(`${merchantId}setup_abc0.00LKR${md5(merchantSecret).toUpperCase()}`).toUpperCase(),
+      );
+    });
+
+    it('uses the first name again for a single-word name', () => {
+      const { params } = new PayHereGateway(config).createSetupCheckout({
+        ...input,
+        customer: { ...input.customer, name: 'Ada' },
+      });
+      expect(params.last_name).toBe('Ada');
+    });
+
+    it('needs a phone number', () => {
+      expect(() =>
+        new PayHereGateway(config).createSetupCheckout({
+          ...input,
+          customer: { ...input.customer, phone: null },
+        }),
+      ).toThrow('phone number');
+    });
+
+    it('reads the saved token from a signed setup notification', () => {
+      expect(
+        new PayHereGateway(config).parseWebhook(notification('2', { customer_token: 'tok_1' })),
+      ).toEqual({ type: 'card_setup', setupId: 'setup_abc', token: 'tok_1' });
+    });
+
+    it('carries no token when the card was refused or the token is missing', () => {
+      const gateway = new PayHereGateway(config);
+      expect(gateway.parseWebhook(notification('-2', { customer_token: 'tok_1' }))).toEqual({
+        type: 'card_setup',
+        setupId: 'setup_abc',
+        token: undefined,
+      });
+      expect(gateway.parseWebhook(notification('2'))).toEqual({
+        type: 'card_setup',
+        setupId: 'setup_abc',
+        token: undefined,
+      });
+    });
+  });
+
   describe('chargeStoredToken', () => {
     const request = {
       paymentId: 'payment-1',
