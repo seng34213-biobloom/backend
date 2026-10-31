@@ -18,7 +18,8 @@ Bio Bloom must never store or log card data (SDS §7.3). Stripe serves internati
 - Webhooks are idempotent: a repeated event returns `duplicate` and changes nothing. The amount and currency must match the payment row.
 - Success marks the payment and order `PAID` and emits `order.confirmed`. Failure marks the payment `FAILED`, cancels the order and returns its units.
 - A success that arrives after the order was cancelled (ADR-010) is refunded, never applied.
-- Subscribe & Save stores only the gateway's reusable token, encrypted (ADR-004), and charges it off-session through `PaymentsService.chargeStoredToken`.
+- Subscribe & Save saves the card on a hosted page too. `POST /api/payments/setup` returns a Stripe setup session or the signed PayHere preapproval form; `POST /api/payments/setup/complete` then returns the gateway's reusable token once, for `POST /api/subscriptions`. Stripe's token comes from the finished session, so its setup webhooks are acknowledged and ignored; PayHere's arrives on its webhook, matched on the signed `order_id`.
+- Subscribe & Save stores only that token, encrypted (ADR-004), and charges it off-session through `PaymentsService.chargeStoredToken`.
 
 ## Consequences
 

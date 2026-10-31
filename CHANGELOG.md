@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `POST /api/payments/setup` and `POST /api/payments/setup/complete` save a card on the Stripe or PayHere hosted page for Subscribe & Save, with no charge; subscriptions now return `discountedUnitPrice` and the variant price (#76)
 - Checkout returns `payment.checkout`: a redirect to a hosted Stripe Checkout page, or the signed PayHere form. Stripe `checkout.session.*` events settle the order, and a gateway that cannot take the payment is refused before the cart and stock are touched (#74)
 - Customer order list and detail include `orderNumber`, `itemCount`, `subtotal`, product names, refund requests and delivery status; raw gateway payloads are no longer returned (#74)
 - Contributing guide, pull request template with the Definition of Done, CODEOWNERS, and the architecture decision records ADR-001 to ADR-013 in `docs/adr/` (#70)
