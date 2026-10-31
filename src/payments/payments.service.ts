@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -10,7 +11,8 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OrderStatus, PaymentGateway, PaymentStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { PayHereGateway } from './gateways/payhere.gateway';
+import { RedisService } from '../redis/redis.service';
+import { CardSetupEvent, PayHereGateway } from './gateways/payhere.gateway';
 import { StoredTokenCharge, StripeGateway, VerifiedPaymentEvent } from './gateways/stripe.gateway';
 
 /** How the storefront sends the customer to the gateway's hosted page. */
@@ -29,6 +31,17 @@ export interface PaymentIntent {
   currency: string;
 }
 
+/** A card setup in progress. PayHere fills in the result through its webhook. */
+interface PaymentSetup {
+  customerId: string;
+  gateway: PaymentGateway;
+  token?: string;
+  failed?: boolean;
+}
+
+// Outlives the gateway's hosted page, so a slow customer can still come back
+const PAYMENT_SETUP_TTL_SECONDS = 2 * 60 * 60;
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -39,6 +52,7 @@ export class PaymentsService {
     private readonly config: ConfigService,
     private readonly stripe: StripeGateway,
     private readonly payHere: PayHereGateway,
+    private readonly redis: RedisService,
   ) {}
 
   async refundCharge(input: {
@@ -129,6 +143,107 @@ export class PaymentsService {
   private storefrontUrl(path: string): string {
     const base = this.config.get<string>('STOREFRONT_URL') ?? 'http://localhost:3000';
     return `${base.replace(/\/$/, '')}${path}`;
+  }
+
+  /**
+   * Starts saving a card for Subscribe & Save (ADR-009). Returns the hosted
+   * gateway page, or in tests a fake token straight away (ADR-011).
+   */
+  async startSetup(
+    customerId: string,
+    gateway: PaymentGateway,
+    returnUrl: string,
+  ): Promise<{ paymentToken: string } | { sessionId: string; checkout: PaymentCheckout }> {
+    this.assertStorefrontUrl(returnUrl);
+    await this.assertCheckoutAvailable(gateway, customerId);
+    const setupId = randomUUID();
+    if (this.config.get<string>('NODE_ENV') === 'test') {
+      const suffix = setupId.replace(/-/g, '');
+      return {
+        paymentToken:
+          gateway === PaymentGateway.STRIPE
+            ? `cus_test_${suffix}:pm_test_${suffix}`
+            : `payhere_token_${suffix}`,
+      };
+    }
+
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      include: { addresses: { orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }], take: 1 } },
+    });
+    if (!customer) throw new NotFoundException(`Customer ${customerId} not found`);
+
+    let sessionId: string;
+    let checkout: PaymentCheckout;
+    if (gateway === PaymentGateway.STRIPE) {
+      const session = await this.stripe.createSetupSession({ setupId, customer, returnUrl });
+      sessionId = session.id;
+      checkout = { method: 'REDIRECT', url: session.url };
+    } else {
+      const [address] = customer.addresses;
+      if (!address) throw new BadRequestException('An address is required for PayHere checkout');
+      const form = this.payHere.createSetupCheckout({ setupId, customer, address, returnUrl });
+      sessionId = form.reference;
+      checkout = { method: 'FORM_POST', url: form.checkoutUrl, fields: form.params };
+    }
+    await this.saveSetup(sessionId, { customerId, gateway });
+    return { sessionId, checkout };
+  }
+
+  /** Hands over the saved token once; a reloaded return page cannot start a second subscription. */
+  async completeSetup(
+    customerId: string,
+    gateway: PaymentGateway,
+    sessionId: string,
+  ): Promise<{ paymentToken: string }> {
+    const raw = await this.redis.getClient().get(this.setupKey(sessionId));
+    const setup = raw ? (JSON.parse(raw) as PaymentSetup) : null;
+    if (!setup || setup.customerId !== customerId || setup.gateway !== gateway) {
+      throw new NotFoundException('Card setup not found or expired');
+    }
+    if (setup.failed) {
+      throw new BadRequestException('The card could not be saved. Please try again.');
+    }
+    const paymentToken =
+      gateway === PaymentGateway.STRIPE
+        ? await this.stripe.completeSetupSession(sessionId, customerId)
+        : setup.token;
+    if (!paymentToken) {
+      throw new ConflictException('PayHere has not confirmed the card yet. Try again shortly.');
+    }
+    if ((await this.redis.getClient().del(this.setupKey(sessionId))) === 0) {
+      throw new NotFoundException('Card setup not found or expired');
+    }
+    return { paymentToken };
+  }
+
+  private setupKey(sessionId: string): string {
+    return `payments:setup:${sessionId}`;
+  }
+
+  private async saveSetup(sessionId: string, setup: PaymentSetup): Promise<void> {
+    await this.redis
+      .getClient()
+      .set(this.setupKey(sessionId), JSON.stringify(setup), 'EX', PAYMENT_SETUP_TTL_SECONDS);
+  }
+
+  private async recordCardSetup(event: CardSetupEvent): Promise<{ status: 'applied' | 'ignored' }> {
+    const raw = await this.redis.getClient().get(this.setupKey(event.setupId));
+    if (!raw) return { status: 'ignored' };
+    await this.saveSetup(event.setupId, {
+      ...(JSON.parse(raw) as PaymentSetup),
+      token: event.token,
+      failed: !event.token,
+    });
+    return { status: 'applied' };
+  }
+
+  // The gateway sends the customer here afterwards, so it must stay on the storefront
+  private assertStorefrontUrl(url: string): void {
+    const storefront = new URL(this.storefrontUrl('/')).origin;
+    if (!URL.canParse(url) || new URL(url).origin !== storefront) {
+      throw new BadRequestException('returnUrl must be a storefront URL');
+    }
   }
 
   async createIntent(input: {
@@ -222,11 +337,15 @@ export class PaymentsService {
   }
 
   async handleStripeWebhook(rawBody: Buffer, signature: string | undefined) {
-    return this.applyWebhookEvent(this.stripe.parseWebhook(rawBody, signature));
+    const event = this.stripe.parseWebhook(rawBody, signature);
+    return event.type === 'ignored' ? { status: event.type } : this.applyWebhookEvent(event);
   }
 
   async handlePayHereWebhook(payload: Record<string, string>) {
-    return this.applyWebhookEvent(this.payHere.parseWebhook(payload));
+    const event = this.payHere.parseWebhook(payload);
+    return event.type === 'card_setup'
+      ? this.recordCardSetup(event)
+      : this.applyWebhookEvent(event);
   }
 
   private async applyWebhookEvent(event: VerifiedPaymentEvent): Promise<{

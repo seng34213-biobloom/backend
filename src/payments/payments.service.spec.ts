@@ -1,8 +1,14 @@
-import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OrderStatus, PaymentGateway, PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
 import { PayHereGateway } from './gateways/payhere.gateway';
 import { StripeGateway, VerifiedPaymentEvent } from './gateways/stripe.gateway';
 import { PaymentsService } from './payments.service';
@@ -15,6 +21,7 @@ describe('PaymentsService', () => {
   let events: jest.Mocked<EventEmitter2>;
   let useRealGateways: boolean;
   let configValues: Record<string, string>;
+  let redisClient: { get: jest.Mock; set: jest.Mock; del: jest.Mock };
   let transaction: {
     payment: { findUnique: jest.Mock; findFirst: jest.Mock; update: jest.Mock };
     order: { update: jest.Mock; findUnique: jest.Mock };
@@ -67,11 +74,14 @@ describe('PaymentsService', () => {
       createCheckoutSession: jest.fn(),
       parseWebhook: jest.fn(),
       chargeStoredToken: jest.fn(),
+      createSetupSession: jest.fn(),
+      completeSetupSession: jest.fn(),
     } as unknown as jest.Mocked<StripeGateway>;
     payHere = {
       createCheckout: jest.fn(),
       parseWebhook: jest.fn(),
       chargeStoredToken: jest.fn(),
+      createSetupCheckout: jest.fn(),
     } as unknown as jest.Mocked<PayHereGateway>;
     events = { emit: jest.fn() } as unknown as jest.Mocked<EventEmitter2>;
     configValues = { STOREFRONT_URL: 'https://shop.example.com/' };
@@ -80,7 +90,215 @@ describe('PaymentsService', () => {
         key === 'NODE_ENV' ? (useRealGateways ? 'development' : 'test') : configValues[key],
       ),
     } as unknown as ConfigService;
-    service = new PaymentsService(prisma, events, config, stripe, payHere);
+    redisClient = {
+      get: jest.fn().mockResolvedValue(null),
+      set: jest.fn().mockResolvedValue('OK'),
+      del: jest.fn().mockResolvedValue(1),
+    };
+    const redis = { getClient: () => redisClient } as unknown as RedisService;
+    service = new PaymentsService(prisma, events, config, stripe, payHere, redis);
+  });
+
+  describe('card setup', () => {
+    const returnUrl = 'https://shop.example.com/checkout?subscribe=1';
+    const customer = {
+      id: 'cust-1',
+      email: 'ada@example.com',
+      name: 'Ada Lovelace',
+      phone: '0771234567',
+      addresses: [{ line1: '12 Temple Road', city: 'Kelaniya', country: 'LK' }],
+    };
+    const inProgress = (gateway: PaymentGateway, extra: Record<string, unknown> = {}) =>
+      redisClient.get.mockResolvedValue(
+        JSON.stringify({ customerId: 'cust-1', gateway, ...extra }),
+      );
+
+    beforeEach(() => {
+      configValues.STRIPE_SECRET_KEY = 'sk_test_123';
+      configValues.PAYHERE_MERCHANT_ID = '1234567';
+      configValues.PAYHERE_MERCHANT_SECRET = 'merchant_secret';
+      (prisma.customer.findUnique as jest.Mock).mockResolvedValue(customer);
+    });
+
+    it('returns a fake reusable token in test mode', async () => {
+      await expect(service.startSetup('cust-1', PaymentGateway.STRIPE, returnUrl)).resolves.toEqual(
+        {
+          paymentToken: expect.stringMatching(/^cus_test_[a-f0-9]+:pm_test_[a-f0-9]+$/),
+        },
+      );
+      await expect(
+        service.startSetup('cust-1', PaymentGateway.PAYHERE, returnUrl),
+      ).resolves.toEqual({ paymentToken: expect.stringMatching(/^payhere_token_[a-f0-9]+$/) });
+      expect(redisClient.set).not.toHaveBeenCalled();
+    });
+
+    it.each(['https://evil.example.com/checkout', 'not a url'])(
+      'refuses to return the customer to %s',
+      async (url) => {
+        await expect(service.startSetup('cust-1', PaymentGateway.STRIPE, url)).rejects.toThrow(
+          'storefront URL',
+        );
+        expect(stripe.createSetupSession).not.toHaveBeenCalled();
+      },
+    );
+
+    it('sends a Stripe customer to the hosted setup page and remembers whose it is', async () => {
+      useRealGateways = true;
+      stripe.createSetupSession.mockResolvedValue({ id: 'cs_1', url: 'https://stripe/cs_1' });
+
+      await expect(service.startSetup('cust-1', PaymentGateway.STRIPE, returnUrl)).resolves.toEqual(
+        {
+          sessionId: 'cs_1',
+          checkout: { method: 'REDIRECT', url: 'https://stripe/cs_1' },
+        },
+      );
+      expect(redisClient.set).toHaveBeenCalledWith(
+        'payments:setup:cs_1',
+        JSON.stringify({ customerId: 'cust-1', gateway: PaymentGateway.STRIPE }),
+        'EX',
+        7200,
+      );
+    });
+
+    it('sends a PayHere customer to the signed preapproval form', async () => {
+      useRealGateways = true;
+      payHere.createSetupCheckout.mockReturnValue({
+        reference: 'setup_1',
+        checkoutUrl: 'https://payhere/pay/preapprove',
+        params: { order_id: 'setup_1' },
+      });
+
+      await expect(
+        service.startSetup('cust-1', PaymentGateway.PAYHERE, returnUrl),
+      ).resolves.toEqual({
+        sessionId: 'setup_1',
+        checkout: {
+          method: 'FORM_POST',
+          url: 'https://payhere/pay/preapprove',
+          fields: { order_id: 'setup_1' },
+        },
+      });
+      expect(payHere.createSetupCheckout.mock.calls[0][0].address).toBe(customer.addresses[0]);
+    });
+
+    it('needs an address for PayHere and a configured gateway for either', async () => {
+      useRealGateways = true;
+      (prisma.customer.findUnique as jest.Mock).mockResolvedValue({ ...customer, addresses: [] });
+      await expect(service.startSetup('cust-1', PaymentGateway.PAYHERE, returnUrl)).rejects.toThrow(
+        'address is required',
+      );
+
+      delete configValues.STRIPE_SECRET_KEY;
+      await expect(service.startSetup('cust-1', PaymentGateway.STRIPE, returnUrl)).rejects.toThrow(
+        ServiceUnavailableException,
+      );
+    });
+
+    it('fails clearly if the customer has gone', async () => {
+      useRealGateways = true;
+      (prisma.customer.findUnique as jest.Mock)
+        .mockResolvedValueOnce(customer)
+        .mockResolvedValueOnce(null);
+      await expect(service.startSetup('cust-1', PaymentGateway.PAYHERE, returnUrl)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('hands over the Stripe token once and forgets the setup', async () => {
+      inProgress(PaymentGateway.STRIPE);
+      stripe.completeSetupSession.mockResolvedValue('cus_1:pm_1');
+
+      await expect(service.completeSetup('cust-1', PaymentGateway.STRIPE, 'cs_1')).resolves.toEqual(
+        { paymentToken: 'cus_1:pm_1' },
+      );
+      expect(stripe.completeSetupSession).toHaveBeenCalledWith('cs_1', 'cust-1');
+      expect(redisClient.del).toHaveBeenCalledWith('payments:setup:cs_1');
+    });
+
+    it('lets only one of two simultaneous completions have the token', async () => {
+      inProgress(PaymentGateway.STRIPE);
+      stripe.completeSetupSession.mockResolvedValue('cus_1:pm_1');
+      redisClient.del.mockResolvedValue(0);
+
+      await expect(service.completeSetup('cust-1', PaymentGateway.STRIPE, 'cs_1')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('hides a setup that is unknown or belongs to someone else', async () => {
+      await expect(service.completeSetup('cust-1', PaymentGateway.STRIPE, 'cs_1')).rejects.toThrow(
+        NotFoundException,
+      );
+
+      inProgress(PaymentGateway.STRIPE);
+      await expect(service.completeSetup('cust-2', PaymentGateway.STRIPE, 'cs_1')).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(service.completeSetup('cust-1', PaymentGateway.PAYHERE, 'cs_1')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(stripe.completeSetupSession).not.toHaveBeenCalled();
+    });
+
+    it('waits for the PayHere webhook, then returns its token', async () => {
+      inProgress(PaymentGateway.PAYHERE);
+      await expect(
+        service.completeSetup('cust-1', PaymentGateway.PAYHERE, 'setup_1'),
+      ).rejects.toThrow(ConflictException);
+      expect(redisClient.del).not.toHaveBeenCalled();
+
+      inProgress(PaymentGateway.PAYHERE, { token: 'payhere_token' });
+      await expect(
+        service.completeSetup('cust-1', PaymentGateway.PAYHERE, 'setup_1'),
+      ).resolves.toEqual({ paymentToken: 'payhere_token' });
+    });
+
+    it('reports a card PayHere could not save', async () => {
+      inProgress(PaymentGateway.PAYHERE, { failed: true });
+      await expect(
+        service.completeSetup('cust-1', PaymentGateway.PAYHERE, 'setup_1'),
+      ).rejects.toThrow('could not be saved');
+    });
+
+    it('stores the outcome of a PayHere setup webhook', async () => {
+      inProgress(PaymentGateway.PAYHERE);
+      payHere.parseWebhook.mockReturnValue({
+        type: 'card_setup',
+        setupId: 'setup_1',
+        token: 'payhere_token',
+      });
+
+      await expect(service.handlePayHereWebhook({})).resolves.toEqual({ status: 'applied' });
+      expect(JSON.parse(redisClient.set.mock.calls[0][1] as string)).toEqual({
+        customerId: 'cust-1',
+        gateway: PaymentGateway.PAYHERE,
+        token: 'payhere_token',
+        failed: false,
+      });
+    });
+
+    it('marks a refused PayHere setup as failed and ignores unknown ones', async () => {
+      inProgress(PaymentGateway.PAYHERE);
+      payHere.parseWebhook.mockReturnValue({ type: 'card_setup', setupId: 'setup_1' });
+      await service.handlePayHereWebhook({});
+      expect(JSON.parse(redisClient.set.mock.calls[0][1] as string)).toMatchObject({
+        failed: true,
+      });
+
+      redisClient.set.mockClear();
+      redisClient.get.mockResolvedValue(null);
+      await expect(service.handlePayHereWebhook({})).resolves.toEqual({ status: 'ignored' });
+      expect(redisClient.set).not.toHaveBeenCalled();
+    });
+
+    it('acknowledges Stripe setup webhooks without touching any payment', async () => {
+      stripe.parseWebhook.mockReturnValue({ type: 'ignored' });
+
+      await expect(service.handleStripeWebhook(Buffer.from('{}'), 'sig')).resolves.toEqual({
+        status: 'ignored',
+      });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
   });
 
   it('creates a pending payment row for a Stripe intent in test mode', async () => {

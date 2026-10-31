@@ -2,11 +2,22 @@ import { BadRequestException, Injectable, ServiceUnavailableException } from '@n
 import { ConfigService } from '@nestjs/config';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { PaymentGateway } from '@prisma/client';
-import type {
-  StoredTokenCharge,
-  StoredTokenChargeRequest,
-  VerifiedPaymentEvent,
+import {
+  appendQuery,
+  type StoredTokenCharge,
+  type StoredTokenChargeRequest,
+  type VerifiedPaymentEvent,
 } from './stripe.gateway';
+
+// Part of order_id, which md5sig signs; custom fields are not signed
+const SETUP_REFERENCE_PREFIX = 'setup_';
+
+/** PayHere's answer to a card setup; `token` is absent when the card was not saved. */
+export interface CardSetupEvent {
+  type: 'card_setup';
+  setupId: string;
+  token?: string;
+}
 
 interface PayHereChargeResponse {
   status: number;
@@ -66,7 +77,49 @@ export class PayHereGateway {
     };
   }
 
-  parseWebhook(payload: Record<string, string>): VerifiedPaymentEvent {
+  /** Signed form for PayHere's preapproval page; the token arrives on the notify webhook. */
+  createSetupCheckout(input: {
+    setupId: string;
+    customer: { name: string; email: string; phone: string | null };
+    address: { line1: string; city: string; country: string };
+    returnUrl: string;
+  }): { reference: string; checkoutUrl: string; params: Record<string, string> } {
+    if (!input.customer.phone) {
+      throw new BadRequestException('A phone number is required for PayHere checkout');
+    }
+    const merchantId = this.requiredConfig('PAYHERE_MERCHANT_ID');
+    const merchantSecret = this.requiredConfig('PAYHERE_MERCHANT_SECRET');
+    const reference = `${SETUP_REFERENCE_PREFIX}${input.setupId}`;
+    const amount = '0.00';
+    const currency = 'LKR';
+    const secretHash = md5(merchantSecret).toUpperCase();
+    const [firstName, ...lastNameParts] = input.customer.name.trim().split(/\s+/);
+
+    return {
+      reference,
+      checkoutUrl: `${this.apiUrl()}/pay/preapprove`,
+      params: {
+        merchant_id: merchantId,
+        return_url: appendQuery(input.returnUrl, `setup_session=${reference}`),
+        cancel_url: input.returnUrl,
+        notify_url: this.requiredConfig('PAYHERE_NOTIFY_URL'),
+        order_id: reference,
+        items: 'Bio Bloom Subscribe & Save',
+        currency,
+        amount,
+        first_name: firstName,
+        last_name: lastNameParts.join(' ') || firstName,
+        email: input.customer.email,
+        phone: input.customer.phone,
+        address: input.address.line1,
+        city: input.address.city,
+        country: input.address.country,
+        hash: md5(`${merchantId}${reference}${amount}${currency}${secretHash}`).toUpperCase(),
+      },
+    };
+  }
+
+  parseWebhook(payload: Record<string, string>): VerifiedPaymentEvent | CardSetupEvent {
     const merchantId = this.requiredConfig('PAYHERE_MERCHANT_ID');
     const merchantSecret = this.requiredConfig('PAYHERE_MERCHANT_SECRET');
     const {
@@ -114,6 +167,13 @@ export class PayHereGateway {
     const status = Number(status_code);
     if (status !== 2 && status !== -1 && status !== -2) {
       throw new BadRequestException(`Unhandled PayHere status code: ${status_code}`);
+    }
+    if (order_id.startsWith(SETUP_REFERENCE_PREFIX)) {
+      return {
+        type: 'card_setup',
+        setupId: order_id,
+        token: status === 2 ? payload.customer_token || undefined : undefined,
+      };
     }
     return {
       gateway: PaymentGateway.PAYHERE,

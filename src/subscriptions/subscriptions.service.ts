@@ -208,6 +208,7 @@ export class SubscriptionsService {
           id: true,
           name: true,
           size: true,
+          price: true,
           product: { select: { id: true, name: true, slug: true } },
         },
       },
@@ -216,7 +217,8 @@ export class SubscriptionsService {
 
   /**
    * Shapes a subscription for the API: the locked discount rate with four
-   * decimals (e.g. "0.1000"), and the product and variant as separate objects.
+   * decimals (e.g. "0.1000"), the unit price after it, and the product and
+   * variant as separate objects.
    */
   private toPublic<
     T extends {
@@ -225,16 +227,24 @@ export class SubscriptionsService {
         id: string;
         name: string;
         size: string;
+        price: Prisma.Decimal;
         product: { id: string; name: string; slug: string };
       };
     },
   >(sub: T) {
     const { variant, ...rest } = sub;
+    const discountRate = new Prisma.Decimal(sub.discountRate);
     return {
       ...rest,
-      discountRate: new Prisma.Decimal(sub.discountRate).toFixed(4),
+      discountRate: discountRate.toFixed(4),
+      discountedUnitPrice: variant.price.mul(new Prisma.Decimal(1).minus(discountRate)).toFixed(2),
       product: variant.product,
-      variant: { id: variant.id, name: variant.name, size: variant.size },
+      variant: {
+        id: variant.id,
+        name: variant.name,
+        size: variant.size,
+        price: variant.price.toFixed(2),
+      },
     };
   }
 }
