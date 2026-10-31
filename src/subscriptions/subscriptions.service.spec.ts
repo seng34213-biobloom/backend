@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { PaymentGateway, SubscriptionStatus } from '@prisma/client';
+import { PaymentGateway, Prisma, SubscriptionStatus } from '@prisma/client';
 import { SubscriptionsService, addDaysUtc, startOfTodayUtc } from './subscriptions.service';
 import { TokenCipherService } from './token-cipher.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -10,6 +10,7 @@ const VARIANT = {
   id: 'v-1',
   name: 'Wild Honey 250g',
   size: '250 g',
+  price: new Prisma.Decimal('1999.00'),
   product: { id: 'p-1', name: 'Wild Honey', slug: 'wild-honey' },
 };
 
@@ -326,11 +327,18 @@ describe('SubscriptionsService', () => {
           id: true,
           name: true,
           size: true,
+          price: true,
           product: { select: { id: true, name: true, slug: true } },
         },
       });
       expect(sub.product).toEqual({ id: 'p-1', name: 'Wild Honey', slug: 'wild-honey' });
-      expect(sub.variant).toEqual({ id: 'v-1', name: 'Wild Honey 250g', size: '250 g' });
+      expect(sub.variant).toEqual({
+        id: 'v-1',
+        name: 'Wild Honey 250g',
+        size: '250 g',
+        price: '1999.00',
+      });
+      expect(sub.discountedUnitPrice).toBe('1799.10');
     });
   });
 });
