@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, Logger, NestMiddleware } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
+import { cookieSecurity } from '../cookies/cookie-security';
 
 export const CSRF_COOKIE_NAME = 'csrf-token';
 export const CSRF_HEADER_NAME = 'x-csrf-token';
@@ -10,9 +11,10 @@ export const CSRF_HEADER_NAME = 'x-csrf-token';
  *
  * Idempotent verbs (GET/HEAD/OPTIONS) are exempt and used to issue the
  * token cookie. State-mutating verbs require the `X-CSRF-Token` header
- * to match the `csrf-token` cookie value byte-for-byte. The cookie is
- * SameSite=Strict so cross-site requests cannot read it; without read
- * access an attacker cannot forge the matching header.
+ * to match the `csrf-token` cookie value byte-for-byte. Another site cannot
+ * read the cookie, and CORS only lets listed origins read the token from
+ * `GET /api/auth/csrf`, so an attacker cannot forge the matching header.
+ * See `cookieSecurity` for the SameSite setting.
  *
  * `/api/webhooks/*` is exempt — those are server-to-server with HMAC
  * signature verification (Phase 5) rather than browser cookies.
@@ -30,8 +32,7 @@ export class CsrfMiddleware implements NestMiddleware {
       const token = randomBytes(24).toString('hex');
       res.cookie(CSRF_COOKIE_NAME, token, {
         httpOnly: false,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
+        ...cookieSecurity(),
         path: '/',
       });
       // Propagate to the current request so safe-verb handlers see it.

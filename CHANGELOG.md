@@ -57,5 +57,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- In production the `auth_token` and `csrf-token` cookies are `SameSite=None` and `Secure`, so the Flutter web build on another site can log in; CORS lists the allowed methods explicitly (#80)
 - `http://localhost:8080`, where the mobile app's web build runs, is allowed by the default `CORS_ORIGINS` and listed in `.env.example` (#78)
 - Every value placed in an email is now HTML-escaped, and `nodemailer` is upgraded to 10 (#43)

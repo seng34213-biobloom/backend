@@ -9,15 +9,12 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AUTH_COOKIE_NAME } from './strategies/jwt.strategy';
 import { CSRF_COOKIE_NAME } from '../common/middleware/csrf.middleware';
+import { cookieSecurity } from '../common/cookies/cookie-security';
 import type { AuthenticatedUser } from './types/auth.types';
 
 @Controller('auth')
 export class AuthController {
-  private readonly cookieSecure: boolean;
-
-  constructor(private readonly auth: AuthService) {
-    this.cookieSecure = process.env.NODE_ENV === 'production';
-  }
+  constructor(private readonly auth: AuthService) {}
 
   // SDS §7.4 — burst limit on registration (20 / 15 min / IP).
   @Public()
@@ -40,8 +37,7 @@ export class AuthController {
     const issued = await this.auth.login(dto);
     res.cookie(AUTH_COOKIE_NAME, issued.token, {
       httpOnly: true,
-      secure: this.cookieSecure,
-      sameSite: 'strict',
+      ...cookieSecurity(),
       maxAge: issued.ttlSec * 1000,
       path: '/',
     });
@@ -58,8 +54,7 @@ export class AuthController {
     res.clearCookie(AUTH_COOKIE_NAME, {
       path: '/',
       httpOnly: true,
-      secure: this.cookieSecure,
-      sameSite: 'strict',
+      ...cookieSecurity(),
     });
   }
 
@@ -92,8 +87,7 @@ export class AuthController {
     if (!existing) {
       res.cookie(CSRF_COOKIE_NAME, token, {
         httpOnly: false,
-        secure: this.cookieSecure,
-        sameSite: 'strict',
+        ...cookieSecurity(),
         path: '/',
       });
     }
