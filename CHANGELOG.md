@@ -57,4 +57,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- `http://localhost:8080`, where the mobile app's web build runs, is allowed by the default `CORS_ORIGINS` and listed in `.env.example` (#78)
 - Every value placed in an email is now HTML-escaped, and `nodemailer` is upgraded to 10 (#43)
