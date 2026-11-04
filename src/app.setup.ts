@@ -2,7 +2,8 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import cookieParser from 'cookie-parser';
 
-const DEFAULT_CORS_ORIGINS = 'http://localhost:3000,http://localhost:3001,http://localhost:3002';
+const DEFAULT_CORS_ORIGINS =
+  'http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:8080';
 
 // Shared by main.ts and the e2e tests so both run the app with the same settings.
 export function configureApp(app: INestApplication): void {
