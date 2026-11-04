@@ -43,6 +43,22 @@ describe('CsrfMiddleware', () => {
     expect(next).toHaveBeenCalledTimes(1);
   });
 
+  it('issues the CSRF cookie as SameSite=None and Secure in production', () => {
+    const savedEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      middleware.use(requestFor('GET', '/api/auth/csrf'), response, next);
+    } finally {
+      process.env.NODE_ENV = savedEnv;
+    }
+
+    expect(response.cookie).toHaveBeenCalledWith(
+      CSRF_COOKIE_NAME,
+      expect.any(String),
+      expect.objectContaining({ httpOnly: false, secure: true, sameSite: 'none' }),
+    );
+  });
+
   it('allows a state-changing request when the cookie and header match', () => {
     const token = 'csrf-token-value';
     const req = requestFor('POST', '/api/private', { [CSRF_COOKIE_NAME]: token }, token);
