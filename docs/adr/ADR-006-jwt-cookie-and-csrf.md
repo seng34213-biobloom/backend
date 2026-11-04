@@ -11,7 +11,7 @@ The web apps and the Flutter app share one API. Browsers should not expose the t
 ## Decision
 
 - Tokens are JWTs signed with `JWT_SECRET`. Customers get a 15-day token; staff, sellers and riders an 8-hour token (`JWT_CUSTOMER_TTL`, `JWT_STAFF_TTL`).
-- Browsers receive the token in the `auth_token` cookie: `HttpOnly`, `SameSite=Strict`, and `Secure` in production. Other clients may send `Authorization: Bearer <token>`.
+- Browsers receive the token in the `auth_token` cookie, which is `HttpOnly`. In production the auth and `csrf-token` cookies are `SameSite=None` and `Secure`, because the Flutter web build calls the API from another site. Outside production they are `SameSite=Strict`, since the apps and the API share the localhost site. Other clients may send `Authorization: Bearer <token>`.
 - Logout writes the token's JTI to Redis as `jti:<id>`, with a TTL equal to the token's remaining lifetime; the JWT strategy rejects revoked tokens.
 - CSRF uses the double-submit cookie pattern: `GET /api/auth/csrf` issues a readable `csrf-token` cookie, and every non-GET request must echo it in the `X-CSRF-Token` header. `/api/webhooks/*` is exempt because those calls are verified by signature.
 - Rate limits (SDS §7.4): 20 requests per IP per 15 minutes on register, login and seller apply, and 100 requests per minute per user (per IP when anonymous) elsewhere. `THROTTLE_*` raises them for load tests only.
@@ -20,5 +20,7 @@ The web apps and the Flutter app share one API. Browsers should not expose the t
 ## Consequences
 
 - XSS cannot read the session token.
+- With `SameSite=None`, the browser also sends the cookies on cross-site requests. The double-submit check, which another site cannot pass without reading the `csrf-token` cookie, and the exact `CORS_ORIGINS` list are what stop forged requests.
+- Browsers that block third-party cookies, such as Safari by default, will not send the cookies from the Flutter web build. The storefront is unaffected because Vercel proxies `/api`, so its cookies stay first-party.
 - Redis is a hard dependency for authenticated requests.
 - The web apps prime the CSRF cookie before their first change and send credentials with every request; CORS lists exact origins (`CORS_ORIGINS`) with credentials enabled.
